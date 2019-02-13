@@ -55,13 +55,13 @@ childspecs() ->
           LocalTcpAddress :: #net_address{},
           Creation :: pos_integer()}}.
 listen(Name) when is_atom(Name) ->
-    {ok, _} = gen_server:start_link({local, ?MODULE}, ?MODULE, [Name], []),
+    {ok, Pid} = gen_server:start_link({local, ?MODULE}, ?MODULE, [Name], []),
     Creation = gen_server:call(?MODULE, {listen, Name}, infinity),
     Addr = #net_address{address = undefined,
                         host = undefined,
                         protocol = ?family,
                         family = ?proto},
-    {ok, {self(), Addr, Creation}}.
+    {ok, {Pid, Addr, Creation}}.
 
 -spec accept(LSocket :: any()) -> AcceptorPid :: pid().
 accept(_LSocket) ->
@@ -238,8 +238,8 @@ handle_call({enable_protocol, P}, _From, State) ->
 handle_call({disable_protocol, P}, _From, #s{listeners = Listeners} = State) ->
     case proplists:is_defined(P, Listeners) of
         true ->
-            {Res, NewState} = remove_proto(P, State),
-            {reply, Res, NewState};
+            NewState = remove_proto(P, State),
+            {reply, ok, NewState};
         false ->
             {reply, {error, not_enabled}, State}
     end;
@@ -298,11 +298,8 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 
 close_listeners(#s{listeners = Listeners} = State) ->
-    lists:foreach(
-        fun ({Module, {LSocket, _Addr, _Creation}}) ->
-            catch Module:close(LSocket)
-        end, Listeners),
-    State#s{listeners = []}.
+    Protos = [M || {M, _} <- Listeners],
+    lists:foldl(fun (M, S) -> remove_proto(M, S) end, State, Protos).
 
 with_dist_port(Port, Fun) ->
     OldMin = application:get_env(kernel,inet_dist_listen_min),
@@ -334,7 +331,7 @@ add_proto(Mod, #s{name = NodeName, listeners = Listeners,
             catch
                 _:E ->
                     catch Mod:close(LSocket),
-                    {E, State}
+                    {{error, E}, State}
             end;
         Error -> {Error, State}
     end.
@@ -343,8 +340,12 @@ remove_proto(Mod, #s{listeners = Listeners, acceptors = Acceptors} = State) ->
     {LSocket, _, _} = proplists:get_value(Mod, Listeners),
     [erlang:unlink(P) || {P, M} <- Acceptors, M =:= Mod],
     catch Mod:close(LSocket),
-    {ok, State#s{listeners = proplists:delete(Mod, Listeners),
-                 acceptors = [{P, M} || {P, M} <- Acceptors, M =/= Mod]}}.
+    case lists:member(Mod, [inet_tls_dist, inet6_tls_dist]) of
+        true -> exit(whereis(ssl_tls_dist_proxy), restart);
+        false -> ok
+    end,
+    State#s{listeners = proplists:delete(Mod, Listeners),
+            acceptors = [{P, M} || {P, M} <- Acceptors, M =/= Mod]}.
 
 listen_proto(Module, NodeName) ->
     NameStr = atom_to_list(NodeName),
