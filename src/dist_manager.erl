@@ -298,6 +298,18 @@ init([]) ->
         _ ->
             ok
     end,
+
+    misc:wait_for_local_name(ns_config, 60000),
+    update_dist_protocols(ns_config:read_key_fast(erl_dist_protocols,
+                                                  undefined)),
+
+    Self = self(),
+    EventHandler =
+        fun ({erl_dist_protocols, _} = E) -> Self ! E;
+            (_) -> ok
+        end,
+    ns_pubsub:subscribe_link(ns_config_events, EventHandler),
+
     gen_server:enter_loop(?MODULE, [], State).
 
 %% There are only two valid cases here:
@@ -515,6 +527,10 @@ handle_call(_Request, _From, State) ->
 handle_cast(_, State) ->
     {noreply, State}.
 
+handle_info({erl_dist_protocols, Protocols}, State) ->
+    update_dist_protocols(Protocols),
+    {noreply, State};
+
 handle_info(_Info, State) ->
     {noreply, State}.
 
@@ -523,3 +539,28 @@ terminate(_Reason, _State) ->
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
+
+update_dist_protocols(undefined) -> ok;
+update_dist_protocols(Protocols) ->
+    ?log_info("Updating dist protocols: ~p", [Protocols]),
+    CurrentProtocols = proplists:get_value(protos, cb_dist:status(), []),
+    ToAdd = Protocols -- CurrentProtocols,
+    ToRemove = CurrentProtocols -- Protocols,
+    lists:foreach(
+        fun (P) ->
+            case cb_dist:disable_protocol(P) of
+                ok -> ok;
+                Error ->
+                    ?log_error("Failed to disable dist protocol ~p with "
+                               "reason ~p", [P, Error])
+            end
+        end, ToRemove),
+    lists:foreach(
+        fun (P) ->
+            case cb_dist:enable_protocol(P) of
+                ok -> ok;
+                Error ->
+                    ?log_error("Failed to enable dist protocol ~p with "
+                               "reason: ~p", [P, Error])
+            end
+        end, ToAdd).

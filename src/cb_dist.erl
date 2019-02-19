@@ -252,6 +252,7 @@ handle_call(status, _From, #s{listeners = Listeners,
     {reply, [{name, Name},
              {prefered_proto, Prefered},
              {prefered_local_proto, PreferedLocal},
+             {protos, [M || {M, _} <- Listeners]},
              {listeners, Listeners},
              {acceptors, Acceptors}], State};
 

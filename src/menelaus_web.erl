@@ -370,6 +370,9 @@ get_action(Req, {AppRoot, IsSSL, Plugins}, Path, PathTokens) ->
                 ["settings", "license"] ->
                     {{[admin, license], read},
                      fun menelaus_web_license:handle_settings_get/1};
+                ["settings", "distProtocols"] ->
+                    {{[admin, security], read},
+                     fun menelaus_web_settings:handle_dist_protocols_get/1};
                 ["internalSettings"] ->
                     {{[admin, settings], read},
                      fun menelaus_web_settings:handle_get/2, [internal]};
@@ -547,6 +550,9 @@ get_action(Req, {AppRoot, IsSSL, Plugins}, Path, PathTokens) ->
                 ["settings", "license", "validate"] ->
                     {{[admin, license], write},
                      fun menelaus_web_license:handle_settings_validate_post/1};
+                ["settings", "distProtocols"] ->
+                    {{[admin, setup], write},
+                     fun menelaus_web_settings:handle_dist_protocols_post/1};
                 ["validateCredentials"] ->
                     {{[admin, security], write},
                      fun menelaus_web_rbac:handle_validate_saslauthd_creds_post/1};
