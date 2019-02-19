@@ -746,11 +746,14 @@ is_raw_addr_node(Node) ->
     {_, Host} = misc:node_name_host(Node),
     inet:parse_address(Host) =/= {error, einval}.
 
+get_current_net_config() ->
+    case misc:get_proto_dist_type() of
+        "inet_tcp"  -> "ipv4";
+        "inet6_tcp" -> "ipv6"
+    end.
+
 check_for_raw_addr(AFamily) ->
-    CurrAFamily = case misc:is_ipv6() of
-                      true  -> "ipv6";
-                      false -> "ipv4"
-                  end,
+    CurrAFamily = get_current_net_config(),
 
     case AFamily of
         CurrAFamily ->
@@ -776,10 +779,31 @@ check_for_raw_addr(AFamily) ->
             end
     end.
 
+check_if_net_config_allowed(State) ->
+    CurrAFamily = get_current_net_config(),
+    AFCfg = ns_config:search(ns_config:get(), auto_failover_cfg, []),
+
+    case validator:get_value(afamily, State) of
+        CurrAFamily ->
+            State;
+        undefined ->
+            State;
+        _ ->
+            case proplists:get_value(enabled, AFCfg, false) of
+                true  ->
+                    M = "Can't change network configuration when auto-failover "
+                        "is enabled.",
+                    validator:return_error('_', M, State);
+                false ->
+                    State
+            end
+    end.
+
 net_config_validators() ->
     [validator:has_params(_),
      validator:one_of(afamily, ["ipv4", "ipv6"], _),
      validator:validate(fun check_for_raw_addr/1, afamily, _),
+     check_if_net_config_allowed(_),
      validator:unsupported(_)].
 
 handle_setup_net_config(Req) ->
@@ -789,7 +813,14 @@ handle_setup_net_config(Req) ->
               AFamily = proplists:get_value(afamily, Values),
               case dist_manager:update_dist_config(AFamily) of
                   ok ->
-                      menelaus_util:reply(Req, 200);
+                      menelaus_util:reply(Req, 200),
+
+                      %% Instruct babysitter to restart its net_kernel and also
+                      %% all its children so they start operating in the new
+                      %% distribution type.
+                      rpc:cast(ns_server:get_babysitter_node(),
+                               ns_babysitter_sup,
+                               reconfig_and_restart_children, []);
                   {error, Err} ->
                       M = io_lib:format("Couldn't store net config: ~p", [Err]),
                       menelaus_util:reply_json(Req, {struct, [{errors, M}]},

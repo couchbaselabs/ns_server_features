@@ -17,7 +17,10 @@
 
 -behavior(supervisor).
 
--export([start_link/0]).
+-include("ns_common.hrl").
+
+-export([start_link/0,
+         reconfig_and_restart_children/0]).
 
 -export([init/1]).
 
@@ -44,3 +47,30 @@ child_specs() ->
           permanent, infinity, supervisor, []},
          {ns_ports_manager, {ns_ports_manager, start_link, []},
           permanent, 1000, worker, []}].
+
+reconfig_and_restart_children() ->
+    NodeName = misc:node_name_short(),
+    try
+        ok = net_kernel:stop(),
+
+        DCfgFile =
+            dist_manager:dist_config_path(path_config:component_path(data)),
+        {ok, DCfg} = ns_babysitter:start_erl_distribution(DCfgFile, NodeName,
+                                                          "start"),
+        ok = dist_manager:store_dist_config(DCfgFile, DCfg),
+
+        ChildIds = [ID || {ID, _, _, _} <-
+                              supervisor:which_children(ns_babysitter_sup)],
+        [ok] = lists:usort([supervisor:terminate_child(ns_babysitter_sup,
+                                                       ChildId)
+                            || ChildId <- lists:reverse(ChildIds)]),
+
+        RV = [supervisor:restart_child(ns_babysitter_sup, ChildId) ||
+                 ChildId <- ChildIds],
+        [ok] = lists:usort([Res || {Res, _} <- RV])
+    catch
+        _T:Error ->
+            ale:info(?USER_LOGGER, "Attempt to restart Couchbase server "
+                     "automatically failed. Need a manual restart for the "
+                     "new config to take effect (Error: ~p)", Error)
+    end.
