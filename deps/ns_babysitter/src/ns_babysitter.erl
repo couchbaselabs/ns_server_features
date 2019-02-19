@@ -18,7 +18,7 @@
 -behavior(application).
 
 -export([start/2, stop/1]).
--export([make_pidfile/0, delete_pidfile/0]).
+-export([make_pidfile/0, delete_pidfile/0, start_erl_distribution/3]).
 
 -include("ns_common.hrl").
 -include_lib("ale/include/ale.hrl").
@@ -36,10 +36,11 @@ start(_, _) ->
     self() ! done,
     log_pending(),
 
-    {have_host, true} = {have_host, ('nonode@nohost' =/= node())},
+    %% Make sure that the node is not named as we will rename the node
+    %% based on the distribution config stored in the file.
+    'nonode@nohost' = node(),
 
-    ok = save_dist_config(),
-    ok = dist_manager:configure_net_kernel(),
+    ok = setup_env_and_dist_from_config(),
 
     Cookie =
         case erlang:get_cookie() of
@@ -62,11 +63,49 @@ start(_, _) ->
 
     ns_babysitter_sup:start_link().
 
-save_dist_config() ->
+start_erl_distribution(DCfgFile, ShortName, Mode) ->
+    {ok, DCfg} = dist_manager:get_dist_type_from_cfg(DCfgFile, Mode),
+    LDistType = proplists:get_value(local_dist_type, DCfg),
+    GDistType = proplists:get_value(global_dist_type, DCfg),
+
+    true = os:putenv("local_dist_type", LDistType),
+    true = os:putenv("global_dist_type", GDistType),
+
+    NodeName = list_to_atom(ShortName ++ "@" ++ misc:localhost()),
+    {ok, _} = net_kernel:start([NodeName, longnames]),
+
+    {ok, DCfg}.
+
+%% Here, we start the net_kernel of the babysitter in the desired mode (which
+%% is stored in the dist_cfg file) programmatically. Earlier the babysitter VM
+%% was always started with a name and proto_dist assigned by the init or
+%% cluster_run script. The intent is to be able to dynamically restart the
+%% distribution in a newly configured mode without performing a service level
+%% restart. If the node is named via the '-name' command line argument then
+%% it's not possible to stop the net_kernel. Hence we have chosen not to name
+%% the VM when started by the init script but to provide a name after reading
+%% the distribution type from the config.
+setup_env_and_dist_from_config() ->
     DCfgFile = dist_manager:dist_config_path(path_config:component_path(data)),
+
+    %% When started from the cluster_run script, the babysitter name will have
+    %% node ID encoded into it as the developer can start multiple nodes. As we
+    %% can't name the VM using the '-name' argument, the babysitter's name will
+    %% now be passed as an environment variable to the babysitter application.
+    %% When this environment variable is not present (when started from the init
+    %% script), we will use 'babysitter_of_ns_1' as the default name.
+    ShortName = application:get_env(ns_babysitter, nodename,
+                                    "babysitter_of_ns_1"),
+
+    %% Node = list_to_atom(ShortName ++ "@" ++ misc:localhost()),
+    {ok, DCfg} = start_erl_distribution(DCfgFile, ShortName, "start"),
+
+    ok = dist_manager:configure_net_kernel(),
+    normalize_dist_config(DCfgFile, DCfg).
+
+normalize_dist_config(DCfgFile, DCfg) ->
     filelib:ensure_dir(DCfgFile),
-    dist_manager:store_dist_config(DCfgFile, misc:get_proto_dist_type(),
-                                   undefined).
+    dist_manager:store_dist_config(DCfgFile, DCfg).
 
 maybe_write_file(Env, Content, Name) ->
     case application:get_env(Env) of

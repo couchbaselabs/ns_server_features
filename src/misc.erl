@@ -1335,11 +1335,11 @@ get_net_family() ->
 
 -spec get_proto_dist_type() -> string().
 get_proto_dist_type() ->
-    case init:get_argument(proto_dist) of
-        {ok, [[Proto]]} ->
-            Proto;
-        error ->
-            "inet_tcp"
+    case os:getenv("global_dist_type") of
+        false ->
+            os:getenv("local_dist_type", "inet_tcp");
+        DistType ->
+            DistType
     end.
 
 -spec is_localhost(string()) -> true | false.

@@ -28,8 +28,8 @@
 
 -export([adjust_my_address/3, read_address_config/0, save_address_config/1,
          ip_config_path/0, using_user_supplied_address/0, reset_address/0,
-         wait_for_node/1, dist_config_path/1, store_dist_config/3,
-         update_dist_config/1]).
+         wait_for_node/1, dist_config_path/1, store_dist_config/2,
+         update_dist_config/1, get_dist_type_from_cfg/2]).
 
 %% used by the service init script.
 -export([get_proto_dist_type/1]).
@@ -62,18 +62,9 @@ using_user_supplied_address() ->
 reset_address() ->
     gen_server:call(?MODULE, reset_address).
 
-store_dist_config(DCfgFile, Cfg) ->
-    Data = io_lib:format("~p.~n", [Cfg]),
+store_dist_config(DCfgFile, DCfg) ->
+    Data = [io_lib:format("~p.~n", [D]) || D <- DCfg],
     misc:atomic_write_file(DCfgFile, Data).
-
-store_dist_config(DCfgFile, CurrDistType, undefined) ->
-    Cfg = {dist_type, list_to_atom(CurrDistType)},
-    store_dist_config(DCfgFile, Cfg);
-store_dist_config(DCfgFile, CurrDistType, NewDistType) ->
-    Cfg = {dist_type,
-           list_to_atom(CurrDistType),
-           list_to_atom(NewDistType)},
-    store_dist_config(DCfgFile, Cfg).
 
 update_dist_config(NewAFamily) ->
     CurrDistType = misc:get_proto_dist_type(),
@@ -89,7 +80,43 @@ update_dist_config(NewAFamily) ->
             DCfgFile = dist_config_path(path_config:component_path(data)),
             ?log_debug("Saving new networking mode (~s) to config file: ~s",
                        [NewDistType, DCfgFile]),
-            store_dist_config(DCfgFile, CurrDistType, NewDistType)
+            DCfg = [{Type, CurrDistType, NewDistType} ||
+                       Type <- [local_dist_type, global_dist_type]],
+            store_dist_config(DCfgFile, DCfg)
+    end.
+
+get_dist_type_from_cfg(DCfgFile, StartStop) ->
+    ReturnDistCfg =
+        fun(LDtype, GDType) ->
+                [{local_dist_type, LDtype},
+                 {global_dist_type, GDType}]
+        end,
+
+    case file:consult(DCfgFile) of
+        {error, enoent} ->
+            {ok, ReturnDistCfg("inet_tcp", "inet_tcp")};
+        {ok, []} ->
+            {ok, ReturnDistCfg("inet_tcp", "inet_tcp")};
+        {ok, [{dist_type, Dist}]} ->
+            Dist1 = atom_to_list(Dist),
+            {ok, ReturnDistCfg(Dist1, Dist1)};
+        {ok, Val} ->
+            RV = [begin
+                      {Type, Modes} =
+                          case DistCfg of
+                              {T, C, N} -> {T, [C, N]};
+                              {T, C}    -> {T, [C]}
+                          end,
+                      DType = case StartStop of
+                                  "start" -> lists:last(Modes);
+                                  "stop"  -> hd(Modes)
+                              end,
+
+                      {Type, DType}
+                  end || DistCfg <- Val],
+            {ok, RV};
+        Err ->
+            Err
     end.
 
 %% This function will be called by the init script to determine
