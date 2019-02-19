@@ -55,7 +55,7 @@ childspecs() ->
           LocalTcpAddress :: #net_address{},
           Creation :: pos_integer()}}.
 listen(Name) when is_atom(Name) ->
-    {ok, _} = gen_server:start_link({local, ?MODULE}, ?MODULE, [], []),
+    {ok, _} = gen_server:start_link({local, ?MODULE}, ?MODULE, [Name], []),
     Creation = gen_server:call(?MODULE, {listen, Name}, infinity),
     Addr = #net_address{address = undefined,
                         host = undefined,
@@ -141,27 +141,46 @@ status() ->
 %%% gen_server callbacks
 %%%===================================================================
 
-init([]) ->
+init([Name]) ->
     error_logger:info_msg("Starting cb_dist..."),
     process_flag(trap_exit,true),
-    {ok, #s{prefered_proto = inet_tcp_dist,
-            prefered_local_proto = inet_tcp_dist,
+    LocalProto = os:getenv("local_dist_type", "inet_tcp") ++ "_dist",
+    GlobalProto =
+        case cb_epmd:node_type(atom_to_list(Name)) of
+            {ok, ns_server, _} ->
+                os:getenv("global_dist_type", "inet_tcp") ++ "_dist";
+            {ok, _, _} ->
+                LocalProto
+        end,
+
+    {ok, #s{prefered_proto = list_to_atom(GlobalProto),
+            prefered_local_proto = list_to_atom(LocalProto),
             creation = rand:uniform(4) - 1}}.
 
 handle_call({listen, Name}, _From, #s{creation = Creation} = State) ->
-    %% This should probably be replaced by config reading
-    Protos = [inet_tcp_dist],
+    Protos0 = [os:getenv("local_dist_type", "inet_tcp")],
+
+    Protos = case cb_epmd:node_type(atom_to_list(Name)) of
+                 {ok, ns_server, _} ->
+                     D = os:getenv("global_dist_type", "inet_tcp"),
+                     lists:usort([D | Protos0]);
+                 {ok, _, _} ->
+                     Protos0
+             end,
+
     Listeners =
         lists:filtermap(
-            fun (Module) ->
-                case listen_proto(Module, Name) of
-                    {ok, Res} -> {true, {Module, Res}};
-                    Error ->
-                        error_logger:error_msg("Listen failed for ~p "
-                                               "with reason: ~p",
-                                               [Module, Error]),
-                        false
-                end
+            fun (Proto) ->
+                    Module = list_to_atom(Proto ++ "_dist"),
+                    case listen_proto(Module, Name) of
+                        {ok, Res} ->
+                            {true, {Module, Res}};
+                        Error ->
+                            error_logger:error_msg("Listen failed for ~p "
+                                                   "with reason: ~p",
+                                                   [Module, Error]),
+                            false
+                    end
             end, Protos),
     {reply, Creation, State#s{listeners = Listeners, name = Name}};
 

@@ -3,7 +3,7 @@
 %% External exports
 -export([start/0, start_link/0, stop/0, port_for_node/2, port_please/2,
          port_please/3, names/0, names/1,
-         register_node/2, register_node/3, is_local_node/1]).
+         register_node/2, register_node/3, is_local_node/1, node_type/1]).
 
 
 %%%----------------------------------------------------------------------
