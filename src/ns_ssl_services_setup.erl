@@ -462,6 +462,35 @@ get_node_cert_data() ->
             end
     end.
 
+generate_ssl_dist_optfile() ->
+    FilePath = filename:join([path_config:component_path(data),
+                              "config", "ssl_dist_opts"]),
+    CertKeyFile = ns_ssl_services_setup:ssl_cert_key_path(),
+    CACertFile = ns_ssl_services_setup:ssl_cacert_key_path(),
+
+    SSLOpts =
+        io_lib:format(
+          "\t\t{certfile, ~p},~n"
+          "\t\t{keyfile, ~p},~n"
+          "\t\t{cacertfile, ~p},~n"
+          "\t\t{verify, verify_peer}",
+          [CertKeyFile, CertKeyFile, CACertFile]),
+
+    ServerSSLOpts =
+        io_lib:format("\t\t{fail_if_no_peer_cert, true},~n~s", [SSLOpts]),
+
+    ClientSSLOpts =
+        io_lib:format("\t\t{verify_fun, "
+                      "{fun dist_manager:verify_cert_for_dist/3, []}},~n~s",
+                      [SSLOpts]),
+
+    Data =
+        io_lib:format(
+          "[~n\t{server, [~n~s~n\t]},~n\t{client, [~n~s~n\t]}~n].",
+          [ServerSSLOpts, ClientSSLOpts]),
+
+    misc:atomic_write_file(FilePath, Data).
+
 init([]) ->
     ?log_info("Used ssl options:~n~p", [ssl_server_opts()]),
 
@@ -477,6 +506,8 @@ init([]) ->
                    false ->
                        []
                end,
+    generate_ssl_dist_optfile(),
+
     {ok, #state{cert_state = build_cert_state(Data),
                 reload_state = RetrySvc,
                 min_ssl_ver = ssl_minimum_protocol(),
