@@ -168,6 +168,8 @@ handle_call({listen, Name}, _From, #s{creation = Creation} = State) ->
                      Protos0
              end,
 
+    error_logger:info_msg("Starting with protos: ~p", [Protos]),
+
     Listeners =
         lists:filtermap(
             fun (Proto) ->

@@ -80,7 +80,16 @@ is_local_node(Node) ->
 %%%===================================================================
 
 port(Type, N, Module) ->
-    base_port(Type) + list_to_integer(N) * 2 + shift(Module).
+    try
+        base_port(Type) + list_to_integer(N) * 2 + shift(Module)
+    catch
+        C:E ->
+            ST = erlang:get_stacktrace(),
+            error_logger:error_msg("Port calc exception: ~p, called as "
+                                   "port(~p, ~p, ~p), Stacktrace: ~p",
+                                   [E, Type, N, Module, ST]),
+            erlang:raise(C,E,ST)
+    end.
 
 port_shifts() ->
     [{inet_tcp_dist,  0},
@@ -100,9 +109,9 @@ is_ns_server_non_tls_port(Port) ->
     (Port < base_port(babysitter)) andalso
     (((Port - base_port(ns_server)) rem 2) == 0).
 
-node_type("ns_1") -> {ok, ns_server, 0};
-node_type("babysitter_of_ns_1") -> {ok, babysitter, 0};
-node_type("couchdb_ns_1") -> {ok, couchdb, 0};
+node_type("ns_1") -> {ok, ns_server, "0"};
+node_type("babysitter_of_ns_1") -> {ok, babysitter, "0"};
+node_type("couchdb_ns_1") -> {ok, couchdb, "0"};
 
 node_type("n_" ++ Nstr) -> {ok, ns_server, Nstr};
 node_type("babysitter_of_n_" ++ Nstr) -> {ok, babysitter, Nstr};
