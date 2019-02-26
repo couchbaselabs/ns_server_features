@@ -106,7 +106,13 @@ create_ns_couchdb_spec() ->
     {ok, ListenMin} = application:get_env(kernel, inet_dist_listen_min),
     {ok, ListenMax} = application:get_env(kernel, inet_dist_listen_max),
 
-    ErlangArgs = CouchIni ++
+    KernelInetrc =
+        case init:get_argument(kernel) of
+            {ok, Args} -> lists:concat([["-kernel" | V] || V <- Args]);
+            _ -> []
+        end,
+
+    ErlangArgs = CouchIni ++ KernelInetrc ++
         ["-setcookie", atom_to_list(ns_server:get_babysitter_cookie()),
          "-name", atom_to_list(ns_node_disco:couchdb_node()),
          "-smp", "enable",
