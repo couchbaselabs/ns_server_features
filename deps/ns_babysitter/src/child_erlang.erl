@@ -169,12 +169,14 @@ handle_arguments(Arguments) ->
                          Flag =:= nouser ->
                       Acc;
                   _ ->
-                      case application:load(Flag) of
-                          {error, {Error, _}} when Error =/= already_loaded ->
+                      IsInetrcArg = (Flag =:= kernel) and
+                                    (hd(Values) =:= "inetrc"),
+                      case is_application(Flag) and not IsInetrcArg of
+                          false ->
                               FlagStr = "-" ++ atom_to_list(Flag),
                               AccArgs1 = [FlagStr | Values] ++ AccArgs,
                               {AccArgs1, AccEnv};
-                          _ ->
+                          true ->
                               AccEnv1 = case lists:keymember(Flag, 1, AccEnv) of
                                             false ->
                                                 [{Flag, get_all_env(Flag)} | AccEnv];
@@ -185,6 +187,12 @@ handle_arguments(Arguments) ->
                       end
               end
       end, {[], []}, Arguments).
+
+is_application(Name) ->
+    case application:load(Name) of
+        {error, {Error, _}} when Error =/= already_loaded -> false;
+        _ -> true
+    end.
 
 get_all_env(ns_babysitter) ->
     Env = application:get_all_env(ns_babysitter),
