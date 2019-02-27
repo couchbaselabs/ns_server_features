@@ -40,6 +40,7 @@ start(_, _) ->
     %% based on the distribution config stored in the file.
     'nonode@nohost' = node(),
 
+    ok = dist_manager:generate_ssl_dist_optfile(),
     ok = setup_env_and_dist_from_config(),
 
     Cookie =

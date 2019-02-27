@@ -29,7 +29,8 @@
 -export([adjust_my_address/3, read_address_config/0, save_address_config/1,
          ip_config_path/0, using_user_supplied_address/0, reset_address/0,
          wait_for_node/1, dist_config_path/1, store_dist_config/2,
-         update_dist_config/1, get_dist_type_from_cfg/2]).
+         update_dist_config/1, get_dist_type_from_cfg/2,
+         generate_ssl_dist_optfile/0]).
 
 %% used by the service init script.
 -export([get_proto_dist_type/1]).
@@ -83,6 +84,42 @@ update_dist_config(NewAFamily) ->
             DCfg = [{Type, CurrDistType, NewDistType} ||
                        Type <- [local_dist_type, global_dist_type]],
             store_dist_config(DCfgFile, DCfg)
+    end.
+
+generate_ssl_dist_optfile() ->
+    FilePath = filename:join([path_config:component_path(data),
+                              "config", "ssl_dist_opts"]),
+
+    case filelib:is_file(FilePath) of
+        true ->
+            ok;
+        false ->
+            CertKeyFile = ns_ssl_services_setup:ssl_cert_key_path(),
+            CACertFile = ns_ssl_services_setup:raw_ssl_cacert_key_path(),
+
+            SSLOpts =
+                io_lib:format(
+                  "\t\t{certfile, ~p},~n"
+                  "\t\t{keyfile, ~p},~n"
+                  "\t\t{cacertfile, ~p},~n"
+                  "\t\t{verify, verify_peer}",
+                  [CertKeyFile, CertKeyFile, CACertFile]),
+
+            ServerSSLOpts =
+                io_lib:format("\t\t{fail_if_no_peer_cert, true},~n~s", [SSLOpts]),
+
+            ClientSSLOpts =
+                io_lib:format("\t\t{verify_fun, "
+                              "{fun dist_manager:verify_cert_for_dist/3, []}},~n~s",
+                              [SSLOpts]),
+
+            Data =
+                io_lib:format(
+                  "[~n\t{server, [~n~s~n\t]},~n\t{client, [~n~s~n\t]}~n].",
+                  [ServerSSLOpts, ClientSSLOpts]),
+
+            filelib:ensure_dir(FilePath),
+            misc:atomic_write_file(FilePath, Data)
     end.
 
 get_dist_type_from_cfg(DCfgFile, StartStop) ->
