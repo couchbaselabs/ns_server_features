@@ -113,7 +113,14 @@ create_ns_couchdb_spec() ->
             _ -> []
         end,
 
-    ErlangArgs = CouchIni ++ KernelInetrc ++
+    SSLDistOpts = case init:get_argument(ssl_dist_optfile) of
+                      {ok, [Path]} when Path =/= [] ->
+                          ["-ssl_dist_optfile" | Path];
+                      _ ->
+                          []
+                  end,
+
+    ErlangArgs = CouchIni ++ KernelInetrc ++ SSLDistOpts ++
         ["-setcookie", atom_to_list(ns_server:get_babysitter_cookie()),
          "-name", atom_to_list(ns_node_disco:couchdb_node()),
          "-smp", "enable",

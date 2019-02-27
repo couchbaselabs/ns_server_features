@@ -748,12 +748,14 @@ is_raw_addr_node(Node) ->
 
 get_current_net_config() ->
     case misc:get_proto_dist_type() of
-        "inet_tcp"  -> "ipv4";
-        "inet6_tcp" -> "ipv6"
+        "inet_tcp"  -> {"ipv4", "off"};
+        "inet_tls"  -> {"ipv4", "on"};
+        "inet6_tcp" -> {"ipv6", "off"};
+        "inet6_tls" -> {"ipv6", "on"}
     end.
 
 check_for_raw_addr(AFamily) ->
-    CurrAFamily = get_current_net_config(),
+    {CurrAFamily, _} = get_current_net_config(),
 
     case AFamily of
         CurrAFamily ->
@@ -780,43 +782,63 @@ check_for_raw_addr(AFamily) ->
     end.
 
 check_if_net_config_allowed(State) ->
-    CurrAFamily = get_current_net_config(),
-    AFCfg = ns_config:search(ns_config:get(), auto_failover_cfg, []),
+    {CurrAFamily, CurrCEncrypt} = get_current_net_config(),
 
-    case validator:get_value(afamily, State) of
-        CurrAFamily ->
-            State;
-        undefined ->
-            State;
-        _ ->
-            case proplists:get_value(enabled, AFCfg, false) of
-                true  ->
-                    M = "Can't change network configuration when auto-failover "
-                        "is enabled.",
-                    validator:return_error('_', M, State);
-                false ->
-                    State
-            end
+    CheckFun =
+        fun(Key, CurrValue) ->
+                case validator:get_value(Key, State) of
+                    CurrValue ->
+                        ok;
+                    undefined ->
+                        ok;
+                    _ ->
+                        case ns_config_auth:is_system_provisioned() andalso
+                            auto_failover:is_enabled() of
+                            true  -> error;
+                            false -> ok
+                        end
+                end
+        end,
+
+    RV = [CheckFun(K, V) || {K, V} <- [{afamily, CurrAFamily},
+                                       {clusterEncryption, CurrCEncrypt}]],
+    case lists:member(error, RV) of
+        true ->
+            M = "Can't change network configuration when auto-failover "
+                "is enabled.",
+            validator:return_error('_', M, State);
+        false ->
+            State
     end.
 
 net_config_validators() ->
     [validator:has_params(_),
+     validator:required(afamily, _),
      validator:one_of(afamily, ["ipv4", "ipv6"], _),
-     validator:validate(fun check_for_raw_addr/1, afamily, _),
-     check_if_net_config_allowed(_),
-     validator:unsupported(_)].
+     validator:validate(fun check_for_raw_addr/1, afamily, _)] ++
+        case cluster_compat_mode:is_cluster_madhatter() of
+            true ->
+                [validator:required(clusterEncryption, _),
+                 validator:one_of(clusterEncryption, ["on", "off"], _)];
+            false ->
+                []
+        end ++ [check_if_net_config_allowed(_),
+                validator:unsupported(_)].
 
 handle_setup_net_config(Req) ->
     menelaus_util:assert_is_enterprise(),
     validator:handle(
       fun(Values) ->
               AFamily = proplists:get_value(afamily, Values),
-              case dist_manager:update_dist_config(AFamily) of
+              CEncrypt = proplists:get_value(clusterEncryption, Values, "off"),
+              case dist_manager:update_dist_config(AFamily, CEncrypt) of
+                  no_change ->
+                      menelaus_util:reply(Req, 200);
                   ok ->
                       menelaus_util:reply(Req, 200),
 
                       %% Instruct babysitter to restart its net_kernel and also
-                      %% all its children so they start operating in the new
+                      %% its children so they start operating in the new
                       %% distribution type.
                       rpc:cast(ns_server:get_babysitter_node(),
                                ns_babysitter_sup,
@@ -827,7 +849,6 @@ handle_setup_net_config(Req) ->
                                                400)
               end
       end, Req, form, net_config_validators()).
-
 
 -ifdef(TEST).
 validate_ix_cbas_path_test() ->

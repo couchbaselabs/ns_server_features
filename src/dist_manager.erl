@@ -29,11 +29,14 @@
 -export([adjust_my_address/3, read_address_config/0, save_address_config/1,
          ip_config_path/0, using_user_supplied_address/0, reset_address/0,
          wait_for_node/1, dist_config_path/1, store_dist_config/2,
-         update_dist_config/1, get_dist_type_from_cfg/2,
+         update_dist_config/2, get_dist_type_from_cfg/2,
          generate_ssl_dist_optfile/0]).
 
 %% used by the service init script.
 -export([get_proto_dist_type/1]).
+
+%% custom x509-path validation function used by Erlang TLS distribution.
+-export([verify_cert_for_dist/3]).
 
 %% used by babysitter and ns_couchdb
 -export([configure_net_kernel/0]).
@@ -67,22 +70,29 @@ store_dist_config(DCfgFile, DCfg) ->
     Data = [io_lib:format("~p.~n", [D]) || D <- DCfg],
     misc:atomic_write_file(DCfgFile, Data).
 
-update_dist_config(NewAFamily) ->
+update_dist_config(NewAFamily, NewCEncryption) ->
     CurrDistType = misc:get_proto_dist_type(),
-    NewDistType = case NewAFamily of
-                      "ipv4" -> "inet_tcp";
-                      "ipv6" -> "inet6_tcp"
+    NewDistType = case {NewAFamily, NewCEncryption} of
+                      {"ipv4", "off"} -> "inet_tcp";
+                      {"ipv4", "on"}  -> "inet_tls";
+                      {"ipv6", "off"} -> "inet6_tcp";
+                      {"ipv6", "on"}  -> "inet6_tls"
                   end,
 
     case NewDistType of
         CurrDistType ->
-            ok;
+            no_change;
         _ ->
             DCfgFile = dist_config_path(path_config:component_path(data)),
-            ?log_debug("Saving new networking mode (~s) to config file: ~s",
-                       [NewDistType, DCfgFile]),
-            DCfg = [{Type, CurrDistType, NewDistType} ||
-                       Type <- [local_dist_type, global_dist_type]],
+            DCfg = [{local_dist_type, case NewDistType of
+                                          "inet_tls" -> "inet_tcp";
+                                          "inet6_tls" -> "inet6_tcp";
+                                          _ -> NewDistType
+                                      end},
+                    {global_dist_type, NewDistType}],
+
+            ?log_debug("Saving new config (~p) to config file: ~s",
+                       [DCfg, DCfgFile]),
             store_dist_config(DCfgFile, DCfg)
     end.
 
@@ -190,6 +200,15 @@ get_proto_dist_type(Params) ->
         end,
 
     init:stop(ExitStatus).
+
+verify_cert_for_dist(_Cert, valid, State) ->
+    {valid, State};
+verify_cert_for_dist(_Cert, valid_peer, State) ->
+    {valid, State};
+verify_cert_for_dist(_Cert, {extension, _}, State) ->
+    {unknown, State};
+verify_cert_for_dist(_Cert, _Event, State) ->
+    {fail, State}.
 
 strip_full(String) ->
     String2 = string:strip(String),

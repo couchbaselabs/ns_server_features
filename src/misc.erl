@@ -1332,7 +1332,7 @@ letrec(Args, F) ->
 
 -spec is_ipv6() -> true | false.
 is_ipv6() ->
-    get_proto_dist_type() =:= "inet6_tcp".
+    lists:member(get_proto_dist_type(), ["inet6_tcp", "inet6_tls"]).
 
 -spec get_net_family() -> inet:address_family().
 get_net_family() ->
