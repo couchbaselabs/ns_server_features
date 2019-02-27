@@ -218,7 +218,7 @@ build_node_info(N, User, Config) ->
                 Ports0
         end,
 
-    {_, Host} = misc:node_name_host(N),
+    Host = misc:extract_node_address(N),
     Local = case node() of
                 N ->
                     [{local, true}];

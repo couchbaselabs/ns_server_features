@@ -419,7 +419,7 @@ goport_args(fts, Config, _Cmd, NodeUUID) ->
 
     FTSIdxDir = get_writable_ix_subdir("@fts"),
 
-    {_, Host} = misc:node_name_host(node()),
+    Host = misc:extract_node_address(node()),
     BindHttp = io_lib:format("~s:~b,~s:~b",
                              [misc:maybe_add_brackets(Host), FtRestPort,
                               misc:inaddr_any([url]),
@@ -500,7 +500,7 @@ goport_args(cbas, Config, Cmd, NodeUUID) ->
     JavaHome = ns_storage_conf:this_node_java_home(),
 
     {ok, LogDir} = application:get_env(ns_server, error_logger_mf_dir),
-    {_, Host} = misc:node_name_host(node()),
+    Host = misc:extract_node_address(node()),
     {ok, MemoryQuota} = memory_quota:get_quota(Config, cbas),
 
     build_port_args([{"-serverPort",           rest_port},
@@ -547,7 +547,7 @@ goport_args(mobile, Config, _Cmd, NodeUUID) ->
 
 goport_args(example, Config, _Cmd, NodeUUID) ->
     Port = service_ports:get_port(rest_port, Config) + 20000,
-    {_, Host} = misc:node_name_host(node()),
+    Host = misc:extract_node_address(node()),
     ["-node-id", binary_to_list(NodeUUID),
      "-host", misc:join_host_port(Host, Port)].
 

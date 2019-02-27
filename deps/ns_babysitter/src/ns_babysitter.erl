@@ -71,7 +71,7 @@ start_erl_distribution(DCfgFile, ShortName, Mode) ->
     true = os:putenv("local_dist_type", LDistType),
     true = os:putenv("global_dist_type", GDistType),
 
-    NodeName = list_to_atom(ShortName ++ "@" ++ misc:localhost()),
+    NodeName = list_to_atom(ShortName ++ "@" ++ misc:localhost_alias()),
     {ok, _} = net_kernel:start([NodeName, longnames]),
 
     {ok, DCfg}.
