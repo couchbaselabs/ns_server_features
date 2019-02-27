@@ -10,7 +10,8 @@
          setup/5, close/1, select/1, is_node_name/1, childspecs/0]).
 
 % management api
--export([get_prefered_dist/1,
+-export([start_link/0,
+         get_prefered_dist/1,
          set_prefered_protocol/2,
          enable_protocol/1,
          disable_protocol/1,
@@ -40,28 +41,32 @@
 %%%===================================================================
 
 childspecs() ->
-    Specs =
+    CBDistSpec = [{?MODULE, {?MODULE, start_link, []},
+                   permanent, infinity, worker, [?MODULE]}],
+    DistSpecs =
         lists:flatmap(
           fun (Mod) ->
-              case (catch Mod:childspecs()) of
-                  {ok, Childspecs} when is_list(Childspecs) -> Childspecs;
-                  _ -> []
-              end
+                  case (catch Mod:childspecs()) of
+                      {ok, Childspecs} when is_list(Childspecs) -> Childspecs;
+                      _ -> []
+                  end
           end, [inet_tcp_dist, inet_tls_dist]),
-    {ok, Specs}.
+    {ok, CBDistSpec ++ DistSpecs}.
+
+start_link() ->
+    gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
 -spec listen(Name :: atom()) ->
     {ok, {LSocket :: any(),
           LocalTcpAddress :: #net_address{},
           Creation :: pos_integer()}}.
 listen(Name) when is_atom(Name) ->
-    {ok, Pid} = gen_server:start_link({local, ?MODULE}, ?MODULE, [Name], []),
     Creation = gen_server:call(?MODULE, {listen, Name}, infinity),
     Addr = #net_address{address = undefined,
                         host = undefined,
                         protocol = ?family,
                         family = ?proto},
-    {ok, {Pid, Addr, Creation}}.
+    {ok, {self(), Addr, Creation}}.
 
 -spec accept(LSocket :: any()) -> AcceptorPid :: pid().
 accept(_LSocket) ->
@@ -141,9 +146,12 @@ status() ->
 %%% gen_server callbacks
 %%%===================================================================
 
-init([Name]) ->
+init([]) ->
     error_logger:info_msg("Starting cb_dist..."),
     process_flag(trap_exit,true),
+    {ok, #s{creation = rand:uniform(4) - 1}}.
+
+handle_call({listen, Name}, _From, #s{creation = Creation} = State) ->
     LocalProto = os:getenv("local_dist_type", "inet_tcp") ++ "_dist",
     GlobalProto =
         case cb_epmd:node_type(atom_to_list(Name)) of
@@ -152,28 +160,13 @@ init([Name]) ->
             {ok, _, _} ->
                 LocalProto
         end,
-
-    {ok, #s{prefered_proto = list_to_atom(GlobalProto),
-            prefered_local_proto = list_to_atom(LocalProto),
-            creation = rand:uniform(4) - 1}}.
-
-handle_call({listen, Name}, _From, #s{creation = Creation} = State) ->
-    Protos0 = [os:getenv("local_dist_type", "inet_tcp")],
-
-    Protos = case cb_epmd:node_type(atom_to_list(Name)) of
-                 {ok, ns_server, _} ->
-                     D = os:getenv("global_dist_type", "inet_tcp"),
-                     lists:usort([D | Protos0]);
-                 {ok, _, _} ->
-                     Protos0
-             end,
+    Protos = lists:usort([list_to_atom(P) || P <- [LocalProto, GlobalProto]]),
 
     error_logger:info_msg("Starting with protos: ~p", [Protos]),
 
     Listeners =
         lists:filtermap(
-            fun (Proto) ->
-                    Module = list_to_atom(Proto ++ "_dist"),
+            fun (Module) ->
                     case listen_proto(Module, Name) of
                         {ok, Res} ->
                             {true, {Module, Res}};
@@ -184,7 +177,10 @@ handle_call({listen, Name}, _From, #s{creation = Creation} = State) ->
                             false
                     end
             end, Protos),
-    {reply, Creation, State#s{listeners = Listeners, name = Name}};
+    {reply, Creation, State#s{listeners = Listeners,
+                              name = Name,
+                              prefered_proto = list_to_atom(GlobalProto),
+                              prefered_local_proto = list_to_atom(LocalProto)}};
 
 handle_call({accept, KernelPid}, _From, #s{listeners = Listeners} = State) ->
     Acceptors =
