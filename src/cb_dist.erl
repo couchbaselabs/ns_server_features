@@ -82,8 +82,8 @@ accept(_LSocket) ->
 accept_connection(_, {AcceptorPid, ConnectionSocket}, MyNode, Allowed, SetupTime) ->
     Module = gen_server:call(?MODULE, {get_module_by_acceptor, AcceptorPid},
                              infinity),
-    error_logger:info_msg("Accepting connection from acceptor ~p using "
-                          "module ~p", [AcceptorPid, Module]),
+    info_msg("Accepting connection from acceptor ~p using module ~p",
+             [AcceptorPid, Module]),
     case Module =/= undefined of
         true ->
             ConPid = Module:accept_connection(AcceptorPid, ConnectionSocket,
@@ -91,9 +91,8 @@ accept_connection(_, {AcceptorPid, ConnectionSocket}, MyNode, Allowed, SetupTime
             {ConPid, AcceptorPid};
         false ->
             {spawn_opt(fun () ->
-                          error_logger:error_msg(
-                            "** Connection from unknown acceptor ~p, "
-                            "please reconnect ** ~n", [AcceptorPid]),
+                          error_msg("** Connection from unknown acceptor ~p, "
+                                    "please reconnect ** ~n", [AcceptorPid]),
                           ?shutdown(no_node)
                       end, [link]), AcceptorPid}
     end.
@@ -110,8 +109,7 @@ select(Node) ->
             SetupTime :: any()) -> ConPid :: pid().
 setup(Node, Type, MyNode, LongOrShortNames, SetupTime) ->
     Module = get_prefered_dist(Node),
-    error_logger:info_msg("Seting up new connection to ~p using ~p",
-                          [Node, Module]),
+    info_msg("Setting up new connection to ~p using ~p", [Node, Module]),
     Module:setup(Node, Type, MyNode, LongOrShortNames, SetupTime).
 
 -spec is_node_name(Node :: atom()) -> true | false.
@@ -148,7 +146,7 @@ status() ->
 %%%===================================================================
 
 init([]) ->
-    error_logger:info_msg("Starting cb_dist..."),
+    info_msg("Starting cb_dist with config ~p", [Config]),
     process_flag(trap_exit,true),
     {ok, #s{creation = rand:uniform(4) - 1}}.
 
@@ -163,19 +161,14 @@ handle_call({listen, Name}, _From, #s{creation = Creation} = State) ->
         end,
     Protos = lists:usort([list_to_atom(P) || P <- [LocalProto, GlobalProto]]),
 
-    error_logger:info_msg("Starting with protos: ~p", [Protos]),
+    info_msg("Initial protos: ~p", [Protos]),
 
     Listeners =
         lists:filtermap(
             fun (Module) ->
                     case listen_proto(Module, Name) of
-                        {ok, Res} ->
-                            {true, {Module, Res}};
-                        Error ->
-                            error_logger:error_msg("Listen failed for ~p "
-                                                   "with reason: ~p",
-                                                   [Module, Error]),
-                            false
+                        {ok, Res} -> {true, {Module, Res}};
+                        _Error -> false
                     end
             end, Protos),
     {reply, Creation, State#s{listeners = Listeners,
@@ -263,7 +256,7 @@ handle_cast(_Msg, State) ->
 
 handle_info({accept, AcceptorPid, ConSocket, _Family, _Protocol},
             #s{kernel_pid = KernelPid} = State) ->
-    error_logger:info_msg("Accepted new connection from ~p", [AcceptorPid]),
+    info_msg("Accepted new connection from ~p", [AcceptorPid]),
     KernelPid ! {accept, self(), {AcceptorPid, ConSocket}, ?family, ?proto},
     {noreply, State};
 
@@ -273,19 +266,19 @@ handle_info({KernelPid, controller, {ConPid, AcceptorPid}},
     {noreply, State};
 
 handle_info({'EXIT', Kernel, Reason}, State = #s{kernel_pid = Kernel}) ->
-    error_logger:error_msg("cb_dist received EXIT from kernel, stoping: ~p", [Reason]),
+    error_msg("received EXIT from kernel, stoping: ~p", [Reason]),
     {stop, Reason, State};
 
 handle_info({'EXIT', From, Reason}, State) ->
-    error_logger:error_msg("cb_dist received EXIT from ~p, stoping: ~p", [From, Reason]),
+    error_msg("received EXIT from ~p, stoping: ~p", [From, Reason]),
     {stop, {'EXIT', From, Reason}, State};
 
 handle_info(Info, State) ->
-    error_logger:error_msg("cb_dist received unknown message: ~p", [Info]),
+    error_msg("received unknown message: ~p", [Info]),
     {noreply, State}.
 
 terminate(Reason, State) ->
-    error_logger:error_msg("cb_dist is terminating with reason: ~p", [Reason]),
+    error_msg("terminating with reason: ~p", [Reason]),
     close_listeners(State),
     ok.
 
@@ -332,10 +325,13 @@ add_proto(Mod, #s{name = NodeName, listeners = Listeners,
                     catch Mod:close(LSocket),
                     {{error, E}, State}
             end;
-        Error -> {Error, State}
+        {error, Reason} ->
+            error_msg("Ignoring ~p listener, reason: ~p", [Mod, Reason]),
+            State
     end.
 
 remove_proto(Mod, #s{listeners = Listeners, acceptors = Acceptors} = State) ->
+    info_msg("Closing cb_dist listener ~p", [Mod]),
     {LSocket, _, _} = proplists:get_value(Mod, Listeners),
     [erlang:unlink(P) || {P, M} <- Acceptors, M =:= Mod],
     catch Mod:close(LSocket),
@@ -349,14 +345,13 @@ remove_proto(Mod, #s{listeners = Listeners, acceptors = Acceptors} = State) ->
 listen_proto(Module, NodeName) ->
     NameStr = atom_to_list(NodeName),
     {ok, Port} = cb_epmd:port_for_node(Module, NameStr),
-    error_logger:info_msg("Listeing on ~p (~p)", [Port, Module]),
+    info_msg("Listening on ~p (~p)", [Port, Module]),
     ListenFun = fun () -> Module:listen(NodeName) end,
     case with_dist_port(Port, ListenFun) of
         {ok, Res} -> {ok, Res};
         Error ->
-            error_logger:error_msg("Failed to start dist ~p on port ~p"
-                                   "with reason: ~p",
-                                   [Module, Port, Error]),
+            error_msg("Failed to start dist ~p on port ~p with reason: ~p",
+                      [Module, Port, Error]),
             Error
     end.
 
@@ -385,3 +380,6 @@ can_add_proto(P, #s{listeners = L}) ->
 is_valid_protocol(P) ->
     lists:member(P, [inet_tcp_dist, inet6_tcp_dist, inet_tls_dist,
                      inet6_tls_dist]).
+
+info_msg(F, A) -> error_logger:info_msg("cb_dist: " ++ F, A).
+error_msg(F, A) -> error_logger:error_msg("cb_dist: " ++ F, A).
