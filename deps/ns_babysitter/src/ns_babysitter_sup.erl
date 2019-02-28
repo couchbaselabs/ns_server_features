@@ -49,8 +49,11 @@ child_specs() ->
           permanent, 1000, worker, []}].
 
 reconfig_and_restart_children() ->
-    NodeName = misc:node_name_short(),
+    ShortName = misc:node_name_short(),
     try
+        %% Terminate the ns_server VM, restart the net_kernel on the baybsitter
+        %% VM using the new distribution type and restart the ns_server VM.
+        ok = supervisor:terminate_child(ns_babysitter_sup, child_ns_server_sup),
         ok = net_kernel:stop(),
 
         DCfgFile =
@@ -59,15 +62,8 @@ reconfig_and_restart_children() ->
                                                           "start"),
         ok = dist_manager:store_dist_config(DCfgFile, DCfg),
 
-        ChildIds = [ID || {ID, _, _, _} <-
-                              supervisor:which_children(ns_babysitter_sup)],
-        [ok] = lists:usort([supervisor:terminate_child(ns_babysitter_sup,
-                                                       ChildId)
-                            || ChildId <- lists:reverse(ChildIds)]),
-
-        RV = [supervisor:restart_child(ns_babysitter_sup, ChildId) ||
-                 ChildId <- ChildIds],
-        [ok] = lists:usort([Res || {Res, _} <- RV])
+        {ok, _} = supervisor:restart_child(ns_babysitter_sup,
+                                           child_ns_server_sup)
     catch
         _T:Error ->
             ale:info(?USER_LOGGER, "Attempt to restart Couchbase server "
