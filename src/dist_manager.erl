@@ -71,25 +71,30 @@ store_dist_config(DCfgFile, DCfg) ->
     misc:atomic_write_file(DCfgFile, Data).
 
 update_dist_config(NewAFamily, NewCEncryption) ->
-    CurrDistType = misc:get_proto_dist_type(),
-    NewDistType = case {NewAFamily, NewCEncryption} of
-                      {"ipv4", "off"} -> "inet_tcp";
-                      {"ipv4", "on"}  -> "inet_tls";
-                      {"ipv6", "off"} -> "inet6_tcp";
-                      {"ipv6", "on"}  -> "inet6_tls"
-                  end,
+    CurrLocalDType = os:getenv("local_dist_type", "inet_tcp"),
+    CurrGlobalDType = os:getenv("global_dist_type", "inet_tcp"),
+    NewGlobalDType = case {NewAFamily, NewCEncryption} of
+                         {"ipv4", "off"} -> "inet_tcp";
+                         {"ipv4", "on"}  -> "inet_tls";
+                         {"ipv6", "off"} -> "inet6_tcp";
+                         {"ipv6", "on"}  -> "inet6_tls"
+                     end,
 
-    case NewDistType of
-        CurrDistType ->
+    case NewGlobalDType of
+        CurrGlobalDType ->
             no_change;
         _ ->
             DCfgFile = dist_config_path(path_config:component_path(data)),
-            DCfg = [{local_dist_type, case NewDistType of
-                                          "inet_tls" -> "inet_tcp";
-                                          "inet6_tls" -> "inet6_tcp";
-                                          _ -> NewDistType
-                                      end},
-                    {global_dist_type, NewDistType}],
+            DCfg = [{local_dist_type,
+                     CurrLocalDType,
+                     case NewGlobalDType of
+                         "inet_tls" -> "inet_tcp";
+                         "inet6_tls" -> "inet6_tcp";
+                         _ -> NewGlobalDType
+                     end},
+                    {global_dist_type,
+                     CurrGlobalDType,
+                     NewGlobalDType}],
 
             ?log_debug("Saving new config (~p) to config file: ~s",
                        [DCfg, DCfgFile]),
