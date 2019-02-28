@@ -169,9 +169,7 @@ handle_arguments(Arguments) ->
                          Flag =:= nouser ->
                       Acc;
                   _ ->
-                      IsInetrcArg = (Flag =:= kernel) and
-                                    (hd(Values) =:= "inetrc"),
-                      case is_application(Flag) and not IsInetrcArg of
+                      case is_application(Flag) and (Flag =/= kernel) of
                           false ->
                               FlagStr = "-" ++ atom_to_list(Flag),
                               AccArgs1 = [FlagStr | Values] ++ AccArgs,

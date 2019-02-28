@@ -11,11 +11,11 @@
 
 % management api
 -export([start_link/0,
-         get_prefered_dist/1,
-         set_prefered_protocol/2,
-         enable_protocol/1,
-         disable_protocol/1,
-         status/0]).
+         get_preferred_dist/1,
+         reload_config/0,
+         status/0,
+         config_path/0,
+         address_family/0]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -25,8 +25,7 @@
             acceptors = [],
             creation = undefined,
             kernel_pid = undefined,
-            prefered_proto = undefined,
-            prefered_local_proto = undefined,
+            config = undefined,
             name = undefined}).
 
 -define(family, ?MODULE).
@@ -99,7 +98,7 @@ accept_connection(_, {AcceptorPid, ConnectionSocket}, MyNode, Allowed, SetupTime
 
 -spec select(Node :: atom()) -> true | false.
 select(Node) ->
-    Module = get_prefered_dist(Node),
+    Module = get_preferred_dist(Node),
     Module:select(Node).
 
 -spec setup(Node :: atom(),
@@ -108,58 +107,59 @@ select(Node) ->
             LongOrShortNames :: any(),
             SetupTime :: any()) -> ConPid :: pid().
 setup(Node, Type, MyNode, LongOrShortNames, SetupTime) ->
-    Module = get_prefered_dist(Node),
+    Module = get_preferred_dist(Node),
     info_msg("Setting up new connection to ~p using ~p", [Node, Module]),
     Module:setup(Node, Type, MyNode, LongOrShortNames, SetupTime).
 
 -spec is_node_name(Node :: atom()) -> true | false.
 is_node_name(Node) ->
-    Module = get_prefered_dist(Node),
+    Module = get_preferred_dist(Node),
     Module:is_node_name(Node).
 
 -spec close(LSocket :: any()) -> ok.
 close(_LSocket) ->
     gen_server:call(?MODULE, close, infinity).
 
--spec get_prefered_dist(TargetNode :: atom() | string()) -> protocol().
-get_prefered_dist(TargetNode) ->
-    gen_server:call(?MODULE, {get_prefered, TargetNode}, infinity).
+-spec get_preferred_dist(TargetNode :: atom() | string()) -> protocol().
+get_preferred_dist(TargetNode) ->
+    gen_server:call(?MODULE, {get_preferred, TargetNode}, infinity).
 
--spec set_prefered_protocol(ComType :: local | external, Proto :: protocol()) ->
-        ok | {error, Reason :: any()}.
-set_prefered_protocol(ComType, Protocol) ->
-    gen_server:call(?MODULE, {set_prefered_protocol, ComType, Protocol}).
-
--spec enable_protocol(Protocol :: protocol()) -> ok | {error, Reason :: any()}.
-enable_protocol(Protocol) ->
-    gen_server:call(?MODULE, {enable_protocol, Protocol}).
-
--spec disable_protocol(Protocol :: protocol()) -> ok | {error, Reason :: any()}.
-disable_protocol(Protocol) ->
-    gen_server:call(?MODULE, {disable_protocol, Protocol}).
+reload_config() ->
+    gen_server:call(?MODULE, reload_config, infinity).
 
 status() ->
     gen_server:call(?MODULE, status).
+
+config_path() ->
+    case application:get_env(kernel, dist_config_file) of
+        {ok, F} -> F;
+        _ ->
+            error_msg("Path to cb_dist config is not set", []),
+            erlang:error(no_dist_config_file)
+    end.
+
+address_family() ->
+    try gen_server:call(?MODULE, address_family, infinity) of
+        Res -> Res
+    catch
+        exit:{noproc, {gen_server, call, _}} ->
+            proto_to_family(conf(preferred_external_proto, read_config()))
+    end.
 
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
 
 init([]) ->
+    Config = read_config(),
     info_msg("Starting cb_dist with config ~p", [Config]),
     process_flag(trap_exit,true),
-    {ok, #s{creation = rand:uniform(4) - 1}}.
+    {ok, #s{config = Config, creation = rand:uniform(4) - 1}}.
 
 handle_call({listen, Name}, _From, #s{creation = Creation} = State) ->
-    LocalProto = os:getenv("local_dist_type", "inet_tcp") ++ "_dist",
-    GlobalProto =
-        case cb_epmd:node_type(atom_to_list(Name)) of
-            {ok, ns_server, _} ->
-                os:getenv("global_dist_type", "inet_tcp") ++ "_dist";
-            {ok, _, _} ->
-                LocalProto
-        end,
-    Protos = lists:usort([list_to_atom(P) || P <- [LocalProto, GlobalProto]]),
+    State1 = State#s{name = Name},
+
+    Protos = get_protos(State1),
 
     info_msg("Initial protos: ~p", [Protos]),
 
@@ -171,10 +171,7 @@ handle_call({listen, Name}, _From, #s{creation = Creation} = State) ->
                         _Error -> false
                     end
             end, Protos),
-    {reply, Creation, State#s{listeners = Listeners,
-                              name = Name,
-                              prefered_proto = list_to_atom(GlobalProto),
-                              prefered_local_proto = list_to_atom(LocalProto)}};
+    {reply, Creation, State1#s{listeners = Listeners}};
 
 handle_call({accept, KernelPid}, _From, #s{listeners = Listeners} = State) ->
     Acceptors =
@@ -190,63 +187,49 @@ handle_call({get_module_by_acceptor, AcceptorPid}, _From,
     Module = proplists:get_value(AcceptorPid, Acceptors),
     {reply, Module, State};
 
-handle_call({get_prefered, Target}, _From,
-            #s{prefered_proto = Proto,
-               prefered_local_proto = LocalProto,
-               name = Name} = State) ->
+handle_call({get_preferred, Target}, _From, #s{name = Name,
+                                               config = Config} = State) ->
     IsLocalDest = cb_epmd:is_local_node(Target),
     IsLocalSource = cb_epmd:is_local_node(Name),
     Res =
         case IsLocalDest or IsLocalSource of
-            true -> LocalProto;
-            false -> Proto
+            true -> conf(preferred_local_proto, Config);
+            false -> conf(preferred_external_proto, Config)
         end,
     {reply, Res, State};
 
 handle_call(close, _From, State) ->
     {stop, normal, ok, close_listeners(State)};
 
-handle_call({set_prefered_protocol, local, P}, _From, State) ->
-    case is_valid_protocol(P) of
-        true -> {reply, ok, State#s{prefered_local_proto = P}};
-        false -> {reply, {error, invalid_protocol}, State}
-    end;
-
-handle_call({set_prefered_protocol, external, P}, _From, State) ->
-    case is_valid_protocol(P) of
-        true -> {reply, ok, State#s{prefered_proto = P}};
-        false -> {reply, {error, invalid_protocol}, State}
-    end;
-
-handle_call({enable_protocol, P}, _From, State) ->
-    case can_add_proto(P, State) of
-        ok ->
-            {Res, NewState} = add_proto(P, State),
-            {reply, Res, NewState};
-        {error, Reason} ->
-            {reply, {errror, Reason}, State}
-    end;
-
-handle_call({disable_protocol, P}, _From, #s{listeners = Listeners} = State) ->
-    case proplists:is_defined(P, Listeners) of
-        true ->
-            NewState = remove_proto(P, State),
-            {reply, ok, NewState};
-        false ->
-            {reply, {error, not_enabled}, State}
+handle_call(reload_config, _From, #s{listeners = Listeners} = State) ->
+    try read_config() of
+        Cfg ->
+            info_msg("Reloading configuration: ~p", [Cfg]),
+            State1 = State#s{config = Cfg},
+            CurrentProtos = [M || {M, _} <- Listeners],
+            NewProtos = get_protos(State1),
+            ToAdd = NewProtos -- CurrentProtos,
+            ToRemove = CurrentProtos -- NewProtos,
+            State2 = lists:foldl(fun (P, S) -> remove_proto(P, S) end,
+                                 State1, ToRemove),
+            State3 = lists:foldl(fun (P, S) -> add_proto(P, S) end,
+                                 State2, ToAdd),
+            {reply, ok, State3}
+    catch
+        _:Error -> {reply, {error, Error}, State}
     end;
 
 handle_call(status, _From, #s{listeners = Listeners,
                               acceptors = Acceptors,
-                              prefered_proto = Prefered,
-                              prefered_local_proto = PreferedLocal,
-                              name = Name} = State) ->
+                              name = Name,
+                              config = Config} = State) ->
     {reply, [{name, Name},
-             {prefered_proto, Prefered},
-             {prefered_local_proto, PreferedLocal},
-             {protos, [M || {M, _} <- Listeners]},
+             {config, Config},
              {listeners, Listeners},
              {acceptors, Acceptors}], State};
+
+handle_call(address_family, _From, #s{config = Config} = State) ->
+    {reply, proto_to_family(conf(preferred_external_proto, Config)), State};
 
 handle_call(_Request, _From, State) ->
     {noreply, State}.
@@ -313,17 +296,25 @@ with_dist_port(Port, Fun) ->
 
 add_proto(Mod, #s{name = NodeName, listeners = Listeners,
                   acceptors = Acceptors} = State) ->
-    case listen_proto(Mod, NodeName) of
-        {ok, L = {LSocket, _, _}} ->
-            try
-                APid = Mod:accept(LSocket),
-                true = is_pid(APid),
-                {ok, State#s{listeners = [{Mod, L}|Listeners],
-                             acceptors = [{APid, Mod}|Acceptors]}}
-            catch
-                _:E ->
-                    catch Mod:close(LSocket),
-                    {{error, E}, State}
+    case can_add_proto(Mod, State) of
+        ok ->
+            case listen_proto(Mod, NodeName) of
+                {ok, L = {LSocket, _, _}} ->
+                    try
+                        APid = Mod:accept(LSocket),
+                        true = is_pid(APid),
+                        State#s{listeners = [{Mod, L}|Listeners],
+                                acceptors = [{APid, Mod}|Acceptors]}
+                    catch
+                        _:E ->
+                            ST = erlang:get_stacktrace(),
+                            catch Mod:close(LSocket),
+                            error_msg(
+                              "Accept failed for protocol ~p with reason: ~p~n"
+                              "Stacktrace: ~p", [Mod, E, ST]),
+                            State
+                    end;
+                _Error -> State
             end;
         {error, Reason} ->
             error_msg("Ignoring ~p listener, reason: ~p", [Mod, Reason]),
@@ -381,5 +372,55 @@ is_valid_protocol(P) ->
     lists:member(P, [inet_tcp_dist, inet6_tcp_dist, inet_tls_dist,
                      inet6_tls_dist]).
 
+conf(Prop, Conf) ->
+    Defaults = [{preferred_external_proto, inet_tcp_dist},
+                {preferred_local_proto, inet_tcp_dist},
+                {local_listeners, [inet_tcp_dist, inet6_tcp_dist]},
+                {external_listerners, [inet_tcp_dist]}],
+    proplists:get_value(Prop, Conf, proplists:get_value(Prop, Defaults)).
+
+read_config() ->
+    File = config_path(),
+    case read_terms_from_file(File) of
+        {error, read_error} ->
+            [];
+        {ok, {dist_type, Dist}} ->
+            Dist1 = list_to_atom((atom_to_list(Dist) ++ "dist")),
+            [{local_dist_type, Dist1}, {global_dist_type, Dist1}];
+        {ok, Val} ->
+            Val;
+        {error, Reason} ->
+            error_msg("Can't read cb_dist config file ~p: ~p", [File, Reason]),
+            erlang:error(invalid_cb_dist_config)
+    end.
+
+%% can't use file:consult here because file server might not be started
+%% by the moment we need to read config
+read_terms_from_file(F) ->
+    case erl_prim_loader:get_file(F) of
+        {ok, Bin, _} ->
+            try {ok, misc:parse_term(Bin)}
+            catch
+                _:_ -> {error, invalid_format}
+            end;
+        error -> {error, read_error}
+    end.
+
+get_protos(#s{name = Name, config = Config}) ->
+    Protos =
+        case cb_epmd:is_local_node(Name) of
+            true ->
+                conf(local_listeners, Config);
+            false ->
+                conf(external_listerners, Config) ++
+                    conf(local_listeners, Config)
+        end,
+    lists:usort(Protos).
+
 info_msg(F, A) -> error_logger:info_msg("cb_dist: " ++ F, A).
 error_msg(F, A) -> error_logger:error_msg("cb_dist: " ++ F, A).
+
+proto_to_family(inet_tcp_dist) -> inet;
+proto_to_family(inet_tls_dist) -> inet;
+proto_to_family(inet6_tcp_dist) -> inet6;
+proto_to_family(inet6_tls_dist) -> inet6.

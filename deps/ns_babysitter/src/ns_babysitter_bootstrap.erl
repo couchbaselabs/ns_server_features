@@ -46,10 +46,12 @@ remote_stop(Node, DCfgFile) ->
     %% based on the distribution config stored in the file.
     'nonode@nohost' = node(),
 
+    ok = application:set_env(kernel, dist_config_file, DCfgFile),
+
     %% Start the net_kernel in the distribution mode as defined in the
     %% config file so that this VM can talk to the babysitter VM. Then
     %% invoke the 'stop' API on the babysitter node via an RPC.
-    ns_babysitter:start_erl_distribution(DCfgFile, "executioner", "stop"),
+    ns_babysitter:start_erl_distribution("executioner"),
 
     RV = rpc:call(Node, ns_babysitter_bootstrap, stop, []),
     ExitStatus = case RV of

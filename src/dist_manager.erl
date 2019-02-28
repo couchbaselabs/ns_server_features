@@ -28,12 +28,8 @@
 
 -export([adjust_my_address/3, read_address_config/0, save_address_config/1,
          ip_config_path/0, using_user_supplied_address/0, reset_address/0,
-         wait_for_node/1, dist_config_path/1, store_dist_config/2,
-         update_dist_config/2, get_dist_type_from_cfg/2,
+         wait_for_node/1, dist_config_path/1, update_dist_config/0,
          generate_ssl_dist_optfile/0]).
-
-%% used by the service init script.
--export([get_proto_dist_type/1]).
 
 %% custom x509-path validation function used by Erlang TLS distribution.
 -export([verify_cert_for_dist/3]).
@@ -67,38 +63,37 @@ reset_address() ->
     gen_server:call(?MODULE, reset_address).
 
 store_dist_config(DCfgFile, DCfg) ->
-    Data = [io_lib:format("~p.~n", [D]) || D <- DCfg],
+    Data = io_lib:format("~p.~n", [DCfg]),
     misc:atomic_write_file(DCfgFile, Data).
 
-update_dist_config(NewAFamily, NewCEncryption) ->
-    CurrLocalDType = os:getenv("local_dist_type", "inet_tcp"),
-    CurrGlobalDType = os:getenv("global_dist_type", "inet_tcp"),
-    NewGlobalDType = case {NewAFamily, NewCEncryption} of
-                         {"ipv4", "off"} -> "inet_tcp";
-                         {"ipv4", "on"}  -> "inet_tls";
-                         {"ipv6", "off"} -> "inet6_tcp";
-                         {"ipv6", "on"}  -> "inet6_tls"
-                     end,
-
-    case NewGlobalDType of
-        CurrGlobalDType ->
-            no_change;
-        _ ->
-            DCfgFile = dist_config_path(path_config:component_path(data)),
-            DCfg = [{local_dist_type,
-                     CurrLocalDType,
-                     case NewGlobalDType of
-                         "inet_tls" -> "inet_tcp";
-                         "inet6_tls" -> "inet6_tcp";
-                         _ -> NewGlobalDType
-                     end},
-                    {global_dist_type,
-                     CurrGlobalDType,
-                     NewGlobalDType}],
-
-            ?log_debug("Saving new config (~p) to config file: ~s",
-                       [DCfg, DCfgFile]),
-            store_dist_config(DCfgFile, DCfg)
+update_dist_config() ->
+    Listeners = ns_config:read_key_fast(erl_external_dist_protocols, undefined),
+    NewAFamily = ns_config:search_node_with_default(address_family, inet),
+    NewCEncryption = ns_config:search_node_with_default(cluster_encryption, false),
+    PreferredExternal =
+        case {NewAFamily, NewCEncryption} of
+            {inet, false} -> inet_tcp_dist;
+            {inet, true} -> inet_tls_dist;
+            {inet6, false} -> inet6_tcp_dist;
+            {inet6, true} -> inet6_tls_dist
+        end,
+    PreferredLocal =
+        case NewAFamily of
+            inet -> inet_tcp_dist;
+            inet6 -> inet6_tcp_dist
+        end,
+    Cfg = [{external_listerners, Listeners} || Listeners =/= undefined] ++
+          [{preferred_external_proto, PreferredExternal},
+           {preferred_local_proto, PreferredLocal}],
+    CfgFile = cb_dist:config_path(),
+    case store_dist_config(CfgFile, Cfg) of
+        ok ->
+            ?log_info("Updated cb_dist config ~p: ~p", [CfgFile, Cfg]),
+            ok;
+        {error, Reason} ->
+            ?log_error("Failed to save cb_dist config to ~p with reason: ~p",
+                       [CfgFile, Reason]),
+            {error, Reason}
     end.
 
 generate_ssl_dist_optfile() ->
@@ -136,75 +131,6 @@ generate_ssl_dist_optfile() ->
             filelib:ensure_dir(FilePath),
             misc:atomic_write_file(FilePath, Data)
     end.
-
-get_dist_type_from_cfg(DCfgFile, StartStop) ->
-    ReturnDistCfg =
-        fun(LDtype, GDType) ->
-                [{local_dist_type, LDtype},
-                 {global_dist_type, GDType}]
-        end,
-
-    case file:consult(DCfgFile) of
-        {error, enoent} ->
-            {ok, ReturnDistCfg("inet_tcp", "inet_tcp")};
-        {ok, []} ->
-            {ok, ReturnDistCfg("inet_tcp", "inet_tcp")};
-        {ok, [{dist_type, Dist}]} ->
-            Dist1 = atom_to_list(Dist),
-            {ok, ReturnDistCfg(Dist1, Dist1)};
-        {ok, Val} ->
-            RV = [begin
-                      {Type, Modes} =
-                          case DistCfg of
-                              {T, C, N} -> {T, [C, N]};
-                              {T, C}    -> {T, [C]}
-                          end,
-                      DType = case StartStop of
-                                  "start" -> lists:last(Modes);
-                                  "stop"  -> hd(Modes)
-                              end,
-
-                      {Type, DType}
-                  end || DistCfg <- Val],
-            {ok, RV};
-        Err ->
-            Err
-    end.
-
-%% This function will be called by the init script to determine
-%% the networking mode to start with.
-get_proto_dist_type(Params) ->
-    [DataDir, StartStop] = Params,
-    DCfgFile = dist_config_path(DataDir),
-
-    ExitStatus =
-        case file:consult(DCfgFile) of
-            {error, enoent} ->
-                io:format("inet_tcp"),
-                0;
-            {error, Err} ->
-                io:format("Couldn't determine proto_dist value. Failed to "
-                          "read from `~s` file: ~p", [DCfgFile, Err]),
-                1;
-            {ok, []} ->
-                io:format("inet_tcp"),
-                0;
-            {ok, Val} ->
-                DistCfg = lists:keyfind(dist_type, 1, Val),
-                Modes = case DistCfg of
-                            {dist_type, C, N} -> [C, N];
-                            {dist_type, C}    -> [C]
-                        end,
-                RV = case StartStop of
-                         "start" -> lists:last(Modes);
-                         "stop"  -> hd(Modes)
-                     end,
-
-                io:format("~s", [RV]),
-                0
-        end,
-
-    init:stop(ExitStatus).
 
 verify_cert_for_dist(_Cert, valid, State) ->
     {valid, State};
@@ -361,12 +287,9 @@ init([]) ->
     end,
 
     misc:wait_for_local_name(ns_config, 60000),
-    update_dist_protocols(ns_config:read_key_fast(erl_dist_protocols,
-                                                  undefined)),
-
     Self = self(),
     EventHandler =
-        fun ({erl_dist_protocols, _} = E) -> Self ! E;
+        fun ({erl_external_dist_protocols, _} = E) -> Self ! E;
             (_) -> ok
         end,
     ns_pubsub:subscribe_link(ns_config_events, EventHandler),
@@ -588,8 +511,8 @@ handle_call(_Request, _From, State) ->
 handle_cast(_, State) ->
     {noreply, State}.
 
-handle_info({erl_dist_protocols, Protocols}, State) ->
-    update_dist_protocols(Protocols),
+handle_info({erl_external_dist_protocols, _}, State) ->
+    update_dist_protocols(),
     {noreply, State};
 
 handle_info(_Info, State) ->
@@ -601,27 +524,14 @@ terminate(_Reason, _State) ->
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
-update_dist_protocols(undefined) -> ok;
-update_dist_protocols(Protocols) ->
-    ?log_info("Updating dist protocols: ~p", [Protocols]),
-    CurrentProtocols = proplists:get_value(protos, cb_dist:status(), []),
-    ToAdd = Protocols -- CurrentProtocols,
-    ToRemove = CurrentProtocols -- Protocols,
-    lists:foreach(
-        fun (P) ->
-            case cb_dist:disable_protocol(P) of
+update_dist_protocols() ->
+    case update_dist_config() of
+        ok ->
+            case cb_dist:reload_config() of
                 ok -> ok;
-                Error ->
-                    ?log_error("Failed to disable dist protocol ~p with "
-                               "reason ~p", [P, Error])
-            end
-        end, ToRemove),
-    lists:foreach(
-        fun (P) ->
-            case cb_dist:enable_protocol(P) of
-                ok -> ok;
-                Error ->
-                    ?log_error("Failed to enable dist protocol ~p with "
-                               "reason: ~p", [P, Error])
-            end
-        end, ToAdd).
+                {error, Error} ->
+                    ?log_error("Failed to reload cb_dist config: ~p", [Error]),
+                    {error, Error}
+            end;
+        {error, Reason} -> {error, Reason}
+    end.

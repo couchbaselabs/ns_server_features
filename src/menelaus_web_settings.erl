@@ -539,7 +539,7 @@ handle_dist_protocols_post(Req) ->
     validator:handle(
       fun (Props) ->
               Protos = proplists:get_value(external, Props),
-              ns_config:set(erl_dist_protocols, Protos),
+              ns_config:set(erl_external_dist_protocols, Protos),
               handle_dist_protocols_get(Req)
       end, Req, form, [validator:required(external, _),
                        validate_ext_protos(external, _),
@@ -566,5 +566,5 @@ validate_ext_protos(Name, State) ->
         end, Name, State).
 
 handle_dist_protocols_get(Req) ->
-    Val = ns_config:read_key_fast(erl_dist_protocols, undefined),
+    Val = ns_config:read_key_fast(erl_external_dist_protocols, undefined),
     reply_json(Req, {[{external, Val}]}).

@@ -22,7 +22,7 @@ port_please(Node, Hostname) ->
     port_please(Node, Hostname, infinity).
 
 port_please(NodeStr, Hostname, Timeout) ->
-    Module = cb_dist:get_prefered_dist(NodeStr),
+    Module = cb_dist:get_preferred_dist(NodeStr),
     case node_type(NodeStr) of
         %% needed for backward compat: old ns_server nodes use dynamic ports
         %% so the only way to know those ports is to ask real epmd

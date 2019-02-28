@@ -18,8 +18,8 @@
 -behavior(application).
 
 -export([start/2, stop/1]).
--export([make_pidfile/0, delete_pidfile/0, start_erl_distribution/3,
-         setup_env_and_dist_from_config/2]).
+-export([make_pidfile/0, delete_pidfile/0, start_erl_distribution/1,
+         setup_env_and_dist_from_config/1]).
 
 -include("ns_common.hrl").
 -include_lib("ale/include/ale.hrl").
@@ -52,7 +52,7 @@ start(_, _) ->
     BabySitterName = application:get_env(ns_babysitter, nodename,
                                          "babysitter_of_ns_1"),
 
-    ok = setup_env_and_dist_from_config(BabySitterName, "start"),
+    ok = setup_env_and_dist_from_config(BabySitterName),
 
     Cookie =
         case erlang:get_cookie() of
@@ -75,18 +75,11 @@ start(_, _) ->
 
     ns_babysitter_sup:start_link().
 
-start_erl_distribution(DCfgFile, ShortName, Mode) ->
-    {ok, DCfg} = dist_manager:get_dist_type_from_cfg(DCfgFile, Mode),
-    LDistType = proplists:get_value(local_dist_type, DCfg),
-    GDistType = proplists:get_value(global_dist_type, DCfg),
-
-    true = os:putenv("local_dist_type", LDistType),
-    true = os:putenv("global_dist_type", GDistType),
-
+start_erl_distribution(ShortName) ->
     NodeName = list_to_atom(ShortName ++ "@" ++ misc:localhost_alias()),
     {ok, _} = net_kernel:start([NodeName, longnames]),
 
-    {ok, DCfg}.
+    ok.
 
 %% Here, we start the net_kernel of the babysitter in the desired mode (which
 %% is stored in the dist_cfg file) programmatically. Earlier the babysitter VM
@@ -97,15 +90,10 @@ start_erl_distribution(DCfgFile, ShortName, Mode) ->
 %% it's not possible to stop the net_kernel. Hence we have chosen not to name
 %% the VM when started by the init script but to provide a name after reading
 %% the distribution type from the config.
-setup_env_and_dist_from_config(ShortName, Mode) ->
-    DCfgFile = dist_manager:dist_config_path(path_config:component_path(data)),
-    {ok, DCfg} = start_erl_distribution(DCfgFile, ShortName, Mode),
+setup_env_and_dist_from_config(ShortName) ->
+    ok = start_erl_distribution(ShortName),
     ok = dist_manager:configure_net_kernel(),
-    normalize_dist_config(DCfgFile, DCfg).
-
-normalize_dist_config(DCfgFile, DCfg) ->
-    filelib:ensure_dir(DCfgFile),
-    dist_manager:store_dist_config(DCfgFile, DCfg).
+    ok.
 
 maybe_write_file(Env, Content, Name) ->
     case application:get_env(Env) of

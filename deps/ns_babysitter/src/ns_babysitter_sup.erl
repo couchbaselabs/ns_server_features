@@ -55,7 +55,7 @@ reconfig_and_restart_children() ->
         %% VM using the new distribution type and restart the ns_server VM.
         ok = supervisor:terminate_child(ns_babysitter_sup, child_ns_server_sup),
         ok = net_kernel:stop(),
-        ok = ns_babysitter:setup_env_and_dist_from_config(ShortName, "start"),
+        ok = ns_babysitter:setup_env_and_dist_from_config(ShortName),
         {ok, _} = supervisor:restart_child(ns_babysitter_sup,
                                            child_ns_server_sup)
     catch

@@ -1332,25 +1332,11 @@ letrec(Args, F) ->
 
 -spec is_ipv6() -> true | false.
 is_ipv6() ->
-    lists:member(get_proto_dist_type(), ["inet6_tcp", "inet6_tls"]).
+    get_net_family() == inet6.
 
 -spec get_net_family() -> inet:address_family().
 get_net_family() ->
-    case is_ipv6() of
-        true ->
-            inet6;
-        false ->
-            inet
-    end.
-
--spec get_proto_dist_type() -> string().
-get_proto_dist_type() ->
-    case os:getenv("global_dist_type") of
-        false ->
-            os:getenv("local_dist_type", "inet_tcp");
-        DistType ->
-            DistType
-    end.
+    cb_dist:address_family().
 
 -spec is_localhost(string()) -> true | false.
 is_localhost(Addr) ->

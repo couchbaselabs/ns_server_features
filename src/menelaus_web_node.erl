@@ -746,16 +746,8 @@ is_raw_addr_node(Node) ->
     {_, Host} = misc:node_name_host(Node),
     inet:parse_address(Host) =/= {error, einval}.
 
-get_current_net_config() ->
-    case misc:get_proto_dist_type() of
-        "inet_tcp"  -> {"ipv4", "off"};
-        "inet_tls"  -> {"ipv4", "on"};
-        "inet6_tcp" -> {"ipv6", "off"};
-        "inet6_tls" -> {"ipv6", "on"}
-    end.
-
 check_for_raw_addr(AFamily) ->
-    {CurrAFamily, _} = get_current_net_config(),
+    CurrAFamily = ns_config:search_node_with_default(address_family, inet),
 
     case AFamily of
         CurrAFamily ->
@@ -782,7 +774,8 @@ check_for_raw_addr(AFamily) ->
     end.
 
 check_if_net_config_allowed(State) ->
-    {CurrAFamily, CurrCEncrypt} = get_current_net_config(),
+    CurrAFamily = ns_config:search_node_with_default(address_family, inet),
+    CurrCEncrypt = ns_config:search_node_with_default(cluster_encryption, false),
 
     CheckFun =
         fun(Key, CurrValue) ->
@@ -815,11 +808,17 @@ net_config_validators() ->
     [validator:has_params(_),
      validator:required(afamily, _),
      validator:one_of(afamily, ["ipv4", "ipv6"], _),
+     validator:validate(fun ("ipv4") -> {value, inet};
+                            ("ipv6") -> {value, inet6}
+                        end, afamily, _),
      validator:validate(fun check_for_raw_addr/1, afamily, _)] ++
         case cluster_compat_mode:is_cluster_madhatter() of
             true ->
                 [validator:required(clusterEncryption, _),
-                 validator:one_of(clusterEncryption, ["on", "off"], _)];
+                 validator:one_of(clusterEncryption, ["on", "off"], _),
+                 validator:validate(fun ("on") -> {value, true};
+                                        ("off") -> {value, false}
+                                    end, clusterEncryption, _)];
             false ->
                 []
         end ++ [check_if_net_config_allowed(_),
@@ -829,12 +828,18 @@ handle_setup_net_config(Req) ->
     menelaus_util:assert_is_enterprise(),
     validator:handle(
       fun(Values) ->
+              CurAFamily =
+                  ns_config:search_node_with_default(address_family, inet),
+              CurCEncrypt =
+                  ns_config:search_node_with_default(cluster_encryption, false),
               AFamily = proplists:get_value(afamily, Values),
-              CEncrypt = proplists:get_value(clusterEncryption, Values, "off"),
-              case dist_manager:update_dist_config(AFamily, CEncrypt) of
-                  no_change ->
-                      menelaus_util:reply(Req, 200);
-                  ok ->
+              CEncrypt = proplists:get_value(clusterEncryption, Values, false),
+
+              case (AFamily =/= CurAFamily) or (CEncrypt =/= CurCEncrypt) of
+                  true ->
+                      ns_config:set({node, node(), address_family}, AFamily),
+                      ns_config:set({node, node(), cluster_encryption}, CEncrypt),
+                      dist_manager:update_dist_config(),
                       menelaus_util:reply(Req, 200),
 
                       %% Instruct babysitter to restart its net_kernel and also
@@ -843,10 +848,8 @@ handle_setup_net_config(Req) ->
                       rpc:cast(ns_server:get_babysitter_node(),
                                ns_babysitter_sup,
                                reconfig_and_restart_children, []);
-                  {error, Err} ->
-                      M = io_lib:format("Couldn't store net config: ~p", [Err]),
-                      menelaus_util:reply_json(Req, {struct, [{errors, M}]},
-                                               400)
+                  false ->
+                      menelaus_util:reply(Req, 200)
               end
       end, Req, form, net_config_validators()).
 

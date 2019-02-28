@@ -108,8 +108,7 @@ create_ns_couchdb_spec() ->
 
     KernelInetrc =
         case init:get_argument(kernel) of
-            {ok, Args} ->
-                lists:concat([["-kernel" | A] || ["inetrc" | _] = A <- Args]);
+            {ok, Args} -> lists:concat([["-kernel" | V] || V <- Args]);
             _ -> []
         end,
 
