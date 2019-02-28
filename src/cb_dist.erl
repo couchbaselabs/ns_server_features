@@ -61,12 +61,13 @@ start_link() ->
           LocalTcpAddress :: #net_address{},
           Creation :: pos_integer()}}.
 listen(Name) when is_atom(Name) ->
-    Creation = gen_server:call(?MODULE, {listen, Name}, infinity),
+    Pid = whereis(?MODULE),
+    Creation = gen_server:call(Pid, {listen, Name}, infinity),
     Addr = #net_address{address = undefined,
                         host = undefined,
                         protocol = ?family,
                         family = ?proto},
-    {ok, {self(), Addr, Creation}}.
+    {ok, {Pid, Addr, Creation}}.
 
 -spec accept(LSocket :: any()) -> AcceptorPid :: pid().
 accept(_LSocket) ->
