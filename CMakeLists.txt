@@ -234,6 +234,7 @@ FILE (MAKE_DIRECTORY "${_etcdir}")
 SET (DATA_PREFIX "${PREFIX}")
 SET (BIN_PREFIX "${PREFIX}")
 CONFIGURE_FILE (etc/static_config.in "${_etcdir}/couchbase/static_config" @ONLY)
+INSTALL (FILES etc/hosts.cfg DESTINATION etc)
 
 FILE (WRITE "${_etcdir}/couchbase/config" "")    # create empty file
 SET (_cdbetcdir "${_etcdir}/couchdb/default.d")
