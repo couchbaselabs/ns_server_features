@@ -378,7 +378,7 @@ conf(Prop, Conf) ->
     Defaults = [{preferred_external_proto, inet_tcp_dist},
                 {preferred_local_proto, inet_tcp_dist},
                 {local_listeners, [inet_tcp_dist, inet6_tcp_dist]},
-                {external_listerners, [inet_tcp_dist]}],
+                {external_listeners, [inet_tcp_dist]}],
     proplists:get_value(Prop, Conf, proplists:get_value(Prop, Defaults)).
 
 read_config() ->
@@ -414,7 +414,7 @@ get_protos(#s{name = Name, config = Config}) ->
             true ->
                 conf(local_listeners, Config);
             false ->
-                conf(external_listerners, Config) ++
+                conf(external_listeners, Config) ++
                     conf(local_listeners, Config)
         end,
     lists:usort(Protos).

@@ -79,7 +79,7 @@ update_dist_config(Listeners, NewAFamily, NewCEncryption) ->
             inet -> inet_tcp_dist;
             inet6 -> inet6_tcp_dist
         end,
-    Cfg = [{external_listerners, Listeners} || Listeners =/= undefined] ++
+    Cfg = [{external_listeners, Listeners} || Listeners =/= undefined] ++
           [{preferred_external_proto, PreferredExternal},
            {preferred_local_proto, PreferredLocal}],
     CfgFile = cb_dist:config_path(),
