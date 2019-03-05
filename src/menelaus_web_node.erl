@@ -20,6 +20,7 @@
 
 -include("ns_common.hrl").
 -include("cut.hrl").
+-include_lib("kernel/include/net_address.hrl").
 
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
@@ -824,34 +825,103 @@ net_config_validators() ->
         end ++ [check_if_net_config_allowed(_),
                 validator:unsupported(_)].
 
+update_type(AFamily, CEncrypt) ->
+    CurAFamily = ns_config:search_node_with_default(address_family, inet),
+    CurCEncrypt = ns_config:search_node_with_default(cluster_encryption, false),
+    case {CurAFamily =/= AFamily, CurCEncrypt =/= CEncrypt} of
+        {true, _} -> all;
+        {false, true} -> external_only;
+        {false, false} -> empty
+    end.
+
+update_proto_in_dist_config(AFamily, CEncryption) ->
+    Listeners = ns_config:read_key_fast(erl_external_dist_protocols, undefined),
+    dist_manager:update_dist_config(Listeners, AFamily, CEncryption),
+    cb_dist:reload_config().
+
 handle_setup_net_config(Req) ->
     menelaus_util:assert_is_enterprise(),
     validator:handle(
-      fun(Values) ->
-              CurAFamily =
-                  ns_config:search_node_with_default(address_family, inet),
-              CurCEncrypt =
-                  ns_config:search_node_with_default(cluster_encryption, false),
+      fun (Values) ->
+              erlang:process_flag(trap_exit, true),
               AFamily = proplists:get_value(afamily, Values),
               CEncrypt = proplists:get_value(clusterEncryption, Values, false),
-
-              case (AFamily =/= CurAFamily) or (CEncrypt =/= CurCEncrypt) of
-                  true ->
+              case update_type(AFamily, CEncrypt) of
+                  empty -> ok;
+                  Type ->
+                      update_proto_in_dist_config(AFamily, CEncrypt),
+                      case Type of
+                          external_only -> ok;
+                          _ -> change_local_dist_proto(AFamily, false)
+                      end,
+                      change_ext_dist_proto(AFamily, CEncrypt),
                       ns_config:set({node, node(), address_family}, AFamily),
-                      ns_config:set({node, node(), cluster_encryption}, CEncrypt),
-                      dist_manager:update_dist_config(),
-                      menelaus_util:reply(Req, 200),
-
-                      %% Instruct babysitter to restart its net_kernel and also
-                      %% its children so they start operating in the new
-                      %% distribution type.
-                      rpc:cast(ns_server:get_babysitter_node(),
-                               ns_babysitter_sup,
-                               reconfig_and_restart_children, []);
-                  false ->
-                      menelaus_util:reply(Req, 200)
-              end
+                      ns_config:set({node, node(), cluster_encryption}, CEncrypt)
+              end,
+              menelaus_util:reply(Req, 200),
+              erlang:exit(normal)
       end, Req, form, net_config_validators()).
+
+change_local_dist_proto(ExpectedFamily, ExpectedEncryption) ->
+    ?log_info("Reconnecting to babysitter and restarting couchdb since local "
+              "dist protocol settings changed, expected afamily is ~p, "
+              "expected encryption is ~p",
+              [ExpectedFamily, ExpectedEncryption]),
+    rpc:call(ns_server:get_babysitter_node(), cb_dist, reload_config, []),
+    ensure_connection_proto(ns_server:get_babysitter_node(),
+                            ExpectedFamily, ExpectedEncryption, 10),
+    %% Curently couchdb doesn't support gracefull change of afamily
+    %% so we have to restart it. Unfortunatelly we can't do it without
+    %% restarting ns_server.
+    {ok, _} = ns_server_cluster_sup:restart_ns_server(),
+    check_connection_proto(ns_node_disco:couchdb_node(),
+                           ExpectedFamily, ExpectedEncryption).
+
+change_ext_dist_proto(ExpectedFamily, ExpectedEncryption) ->
+    Nodes = ns_node_disco:nodes_wanted() -- [node()],
+    ?log_info("Reconnecting to all known erl nodes since dist protocol "
+              "settings changed, expected afamily is ~p, expected encryption "
+              "is ~p, nodes: ~p",
+              [ExpectedFamily, ExpectedEncryption, Nodes]),
+    [{N, ensure_connection_proto(N, ExpectedFamily, ExpectedEncryption, 10)}
+        || N <- Nodes].
+
+ensure_connection_proto(_Node, _Family, _Encr, Retries) when Retries < 0 ->
+    {error, exceeded_retries};
+ensure_connection_proto(Node, Family, Encryption, Retries) ->
+    erlang:disconnect_node(Node),
+    case net_kernel:connect(Node) of
+        true ->
+            ?log_debug("Reconnected to ~p...", [Node]),
+            case check_connection_proto(Node, Family, Encryption) of
+                ok ->
+                    ok;
+                {error, Reason} ->
+                    ?log_error("Failed to establish connection to node ~p with "
+                               "reason: ~p, retries left: ~p",
+                               [Node, Reason, Retries - 1]),
+                    ensure_connection_proto(Node, Family, Encryption,
+                                            Retries - 1)
+            end;
+        false ->
+            ?log_error("Failed to connect to node ~p", [Node]),
+            {error, connect_failed}
+    end.
+
+check_connection_proto(Node, Family, Encryption) ->
+    Proto = case Encryption of
+                true -> proxy;
+                false -> tcp
+            end,
+    case net_kernel:node_info(Node) of
+        {ok, Info} ->
+            case proplists:get_value(address, Info) of
+                #net_address{protocol = Proto, family = Family} -> ok;
+                A -> {error, {wrong_proto, A}}
+            end;
+        {error, Error} ->
+            {error, Error}
+    end.
 
 -ifdef(TEST).
 validate_ix_cbas_path_test() ->

@@ -28,7 +28,7 @@
 
 -export([adjust_my_address/3, read_address_config/0, save_address_config/1,
          ip_config_path/0, using_user_supplied_address/0, reset_address/0,
-         wait_for_node/1, dist_config_path/1, update_dist_config/0,
+         wait_for_node/1, dist_config_path/1, update_dist_config/3,
          generate_ssl_dist_optfile/0]).
 
 %% custom x509-path validation function used by Erlang TLS distribution.
@@ -66,10 +66,7 @@ store_dist_config(DCfgFile, DCfg) ->
     Data = io_lib:format("~p.~n", [DCfg]),
     misc:atomic_write_file(DCfgFile, Data).
 
-update_dist_config() ->
-    Listeners = ns_config:read_key_fast(erl_external_dist_protocols, undefined),
-    NewAFamily = ns_config:search_node_with_default(address_family, inet),
-    NewCEncryption = ns_config:search_node_with_default(cluster_encryption, false),
+update_dist_config(Listeners, NewAFamily, NewCEncryption) ->
     PreferredExternal =
         case {NewAFamily, NewCEncryption} of
             {inet, false} -> inet_tcp_dist;
@@ -525,7 +522,10 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
 update_dist_protocols() ->
-    case update_dist_config() of
+    Listeners = ns_config:read_key_fast(erl_external_dist_protocols, undefined),
+    AFamily = ns_config:search_node_with_default(address_family, inet),
+    CEncryption = ns_config:search_node_with_default(cluster_encryption, false),
+    case update_dist_config(Listeners, AFamily, CEncryption) of
         ok ->
             case cb_dist:reload_config() of
                 ok -> ok;
