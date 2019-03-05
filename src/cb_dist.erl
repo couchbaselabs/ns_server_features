@@ -378,8 +378,14 @@ conf(Prop, Conf) ->
     Defaults = [{preferred_external_proto, inet_tcp_dist},
                 {preferred_local_proto, inet_tcp_dist},
                 {local_listeners, [inet_tcp_dist, inet6_tcp_dist]},
-                {external_listeners, [inet_tcp_dist]}],
+                {external_listeners, [inet_tcp_dist, inet6_tcp_dist]}],
     proplists:get_value(Prop, Conf, proplists:get_value(Prop, Defaults)).
+
+transform_old_to_new_config(Dist) ->
+    DistType = list_to_atom((atom_to_list(Dist) ++ "_dist")),
+    true = is_valid_protocol(DistType),
+    [{preferred_external_proto, DistType},
+     {preferred_local_proto, DistType}].
 
 read_config() ->
     File = config_path(),
@@ -387,8 +393,9 @@ read_config() ->
         {error, read_error} ->
             [];
         {ok, {dist_type, Dist}} ->
-            Dist1 = list_to_atom((atom_to_list(Dist) ++ "dist")),
-            [{local_dist_type, Dist1}, {global_dist_type, Dist1}];
+            transform_old_to_new_config(Dist);
+        {ok, {dist_type, _, Dist}} ->
+            transform_old_to_new_config(Dist);
         {ok, Val} ->
             Val;
         {error, Reason} ->
