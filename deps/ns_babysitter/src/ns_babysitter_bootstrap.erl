@@ -17,7 +17,7 @@
 -export([start/0,
          stop/0,
          get_quick_stop/0,
-         remote_stop/2,
+         remote_stop/1,
          override_resolver/0]).
 
 -include("ns_common.hrl").
@@ -41,12 +41,10 @@ stop() ->
     ns_babysitter:delete_pidfile(),
     init:stop().
 
-remote_stop(Node, DCfgFile) ->
+remote_stop(Node) ->
     %% Make sure that the node is not named as we will rename the node
     %% based on the distribution config stored in the file.
     'nonode@nohost' = node(),
-
-    ok = application:set_env(kernel, dist_config_file, DCfgFile),
 
     %% Start the net_kernel in the distribution mode as defined in the
     %% config file so that this VM can talk to the babysitter VM. Then

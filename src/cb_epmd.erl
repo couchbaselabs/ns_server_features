@@ -105,4 +105,6 @@ node_type("n_" ++ Nstr) -> {ok, ns_server, Nstr};
 node_type("babysitter_of_n_" ++ Nstr) -> {ok, babysitter, Nstr};
 node_type("couchdb_n_" ++ Nstr) -> {ok, couchdb, Nstr};
 
+node_type("executioner") -> {ok, babysitter, "1"};
+
 node_type(Name) -> {error, {unknown_node, Name}}.
