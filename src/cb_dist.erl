@@ -327,7 +327,9 @@ remove_proto(Mod, #s{listeners = Listeners, acceptors = Acceptors} = State) ->
     [erlang:unlink(P) || {P, M} <- Acceptors, M =:= Mod],
     catch Mod:close(LSocket),
     case lists:member(Mod, [inet_tls_dist, inet6_tls_dist]) of
-        true -> exit(whereis(ssl_tls_dist_proxy), restart);
+        true ->
+            supervisor:terminate_child(ssl_dist_sup, ssl_tls_dist_proxy),
+            supervisor:restart_child(ssl_dist_sup, ssl_tls_dist_proxy);
         false -> ok
     end,
     State#s{listeners = proplists:delete(Mod, Listeners),
