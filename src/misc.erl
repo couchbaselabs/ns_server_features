@@ -1717,7 +1717,8 @@ take_marker(Path) ->
     Result.
 
 is_free_nodename(ShortName) ->
-    {ok, Names} = erl_epmd:names({127,0,0,1}),
+    ErlEpmd = net_kernel:epmd_module(),
+    {ok, Names} = ErlEpmd:names({127,0,0,1}),
     not lists:keymember(ShortName, 1, Names).
 
 wait_for_nodename(ShortName) ->
