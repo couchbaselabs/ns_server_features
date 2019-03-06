@@ -15,7 +15,8 @@
          reload_config/0,
          status/0,
          config_path/0,
-         address_family/0]).
+         address_family/0,
+         validate_config_file/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -143,7 +144,8 @@ address_family() ->
         Res -> Res
     catch
         exit:{noproc, {gen_server, call, _}} ->
-            proto_to_family(conf(preferred_external_proto, read_config()))
+            Cfg = read_config(config_path(), true),
+            proto_to_family(conf(preferred_external_proto, Cfg))
     end.
 
 %%%===================================================================
@@ -151,7 +153,7 @@ address_family() ->
 %%%===================================================================
 
 init([]) ->
-    Config = read_config(),
+    Config = read_config(config_path(), true),
     info_msg("Starting cb_dist with config ~p", [Config]),
     process_flag(trap_exit,true),
     {ok, #s{config = Config, creation = rand:uniform(4) - 1}}.
@@ -202,7 +204,7 @@ handle_call(close, _From, State) ->
     {stop, normal, ok, close_listeners(State)};
 
 handle_call(reload_config, _From, #s{listeners = Listeners} = State) ->
-    try read_config() of
+    try read_config(config_path(), true) of
         Cfg ->
             info_msg("Reloading configuration: ~p", [Cfg]),
             State1 = State#s{config = Cfg},
@@ -375,11 +377,13 @@ is_valid_protocol(P) ->
                      inet6_tls_dist]).
 
 conf(Prop, Conf) ->
-    Defaults = [{preferred_external_proto, inet_tcp_dist},
-                {preferred_local_proto, inet_tcp_dist},
-                {local_listeners, [inet_tcp_dist, inet6_tcp_dist]},
-                {external_listeners, [inet_tcp_dist, inet6_tcp_dist]}],
-    proplists:get_value(Prop, Conf, proplists:get_value(Prop, Defaults)).
+    proplists:get_value(Prop, Conf, proplists:get_value(Prop, defaults())).
+
+defaults() ->
+    [{preferred_external_proto, inet_tcp_dist},
+     {preferred_local_proto, inet_tcp_dist},
+     {local_listeners, [inet_tcp_dist, inet6_tcp_dist]},
+     {external_listeners, [inet_tcp_dist, inet6_tcp_dist]}].
 
 transform_old_to_new_config(Dist) ->
     DistType = list_to_atom((atom_to_list(Dist) ++ "_dist")),
@@ -387,17 +391,16 @@ transform_old_to_new_config(Dist) ->
     [{preferred_external_proto, DistType},
      {preferred_local_proto, DistType}].
 
-read_config() ->
-    File = config_path(),
+read_config(File, IgnoreReadError) ->
     case read_terms_from_file(File) of
-        {error, read_error} ->
-            [];
         {ok, {dist_type, Dist}} ->
             transform_old_to_new_config(Dist);
         {ok, {dist_type, _, Dist}} ->
             transform_old_to_new_config(Dist);
         {ok, Val} ->
             Val;
+        {error, read_error} when IgnoreReadError ->
+            [];
         {error, Reason} ->
             error_msg("Can't read cb_dist config file ~p: ~p", [File, Reason]),
             erlang:error(invalid_cb_dist_config)
@@ -433,3 +436,28 @@ proto_to_family(inet_tcp_dist) -> inet;
 proto_to_family(inet_tls_dist) -> inet;
 proto_to_family(inet6_tcp_dist) -> inet6;
 proto_to_family(inet6_tls_dist) -> inet6.
+
+validate_config_file(CfgFile) ->
+    try
+        Cfg = read_config(CfgFile, false),
+        is_list(Cfg) orelse throw(not_list),
+        ([E || {_, _} = E <- Cfg] == Cfg) orelse throw(not_proplist),
+        Unknown = proplists:get_keys(Cfg) -- proplists:get_keys(defaults()),
+        (Unknown == []) orelse throw({unknown_props, Unknown}),
+        is_valid_protocol(conf(preferred_external_proto, Cfg))
+            orelse throw(invalid_preferred_external_proto),
+        is_valid_protocol(conf(preferred_local_proto, Cfg))
+            orelse throw(invalid_preferred_local_proto),
+        LocalListeners = conf(local_listeners, Cfg),
+        ExternalListeners = conf(external_listeners, Cfg),
+        Invalid = [L || L <- LocalListeners, not is_valid_protocol(L)] ++
+                  [L || L <- ExternalListeners, not is_valid_protocol(L)],
+        (Invalid == []) orelse throw({invalid_listerners, Invalid}),
+        length(lists:usort(LocalListeners)) == length(LocalListeners)
+            orelse throw(not_unique_listeners),
+        length(lists:usort(ExternalListeners)) == length(ExternalListeners)
+            orelse throw(not_unique_listeners),
+        ok
+    catch
+        _:E -> {error, E}
+    end.

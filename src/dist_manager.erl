@@ -63,8 +63,23 @@ reset_address() ->
     gen_server:call(?MODULE, reset_address).
 
 store_dist_config(DCfgFile, DCfg) ->
+    DirName = filename:dirname(DCfgFile),
+    FileName = filename:basename(DCfgFile),
+    TmpPath = path_config:tempfile(DirName, FileName, ".tmp"),
     Data = io_lib:format("~p.~n", [DCfg]),
-    misc:atomic_write_file(DCfgFile, Data).
+    try
+        case misc:write_file(TmpPath, Data) of
+            ok ->
+                case cb_dist:validate_config_file(TmpPath) of
+                    ok -> misc:atomic_rename(TmpPath, DCfgFile);
+                    Y -> Y
+                end;
+            X ->
+                X
+        end
+    after
+        (catch file:delete(TmpPath))
+    end.
 
 update_dist_config(Listeners, NewAFamily, NewCEncryption) ->
     PreferredExternal =
