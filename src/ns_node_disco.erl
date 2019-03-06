@@ -220,7 +220,13 @@ do_nodes_wanted_updated_fun(NodeListIn) ->
                             NodeList),
     ?log_debug("ns_node_disco: nodes_wanted pong: ~p, with cookie: ~p",
                [PongList, ns_cookie_manager:sanitize_cookie(erlang:get_cookie())]),
-    case lists:member(node(), NodeList) of
+
+    Node = node(),
+    %% Checking if node is nonode@nohost is a hack to make sure that node is not
+    %% autoremoving itself from cluster when dist_manager crashes
+    %% (dist_manager restarts net_kernel in init, so node can be invalid while
+    %%  dist_manager is starting)
+    case lists:member(Node, NodeList) orelse (Node =:= 'nonode@nohost') of
         true ->
             ok;
         false ->
