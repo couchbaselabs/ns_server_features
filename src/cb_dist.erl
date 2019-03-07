@@ -324,7 +324,7 @@ add_proto(Mod, #s{name = NodeName, listeners = Listeners,
     end.
 
 remove_proto(Mod, #s{listeners = Listeners, acceptors = Acceptors} = State) ->
-    info_msg("Closing cb_dist listener ~p", [Mod]),
+    info_msg("Closing listener ~p", [Mod]),
     {LSocket, _, _} = proplists:get_value(Mod, Listeners),
     [erlang:unlink(P) || {P, M} <- Acceptors, M =:= Mod],
     catch Mod:close(LSocket),
@@ -340,7 +340,7 @@ remove_proto(Mod, #s{listeners = Listeners, acceptors = Acceptors} = State) ->
 listen_proto(Module, NodeName) ->
     NameStr = atom_to_list(NodeName),
     {ok, Port} = cb_epmd:port_for_node(Module, NameStr),
-    info_msg("Listening on ~p (~p)", [Port, Module]),
+    info_msg("Starting ~p listener on ~p...", [Module, Port]),
     ListenFun = fun () -> Module:listen(NodeName) end,
     case with_dist_port(Port, ListenFun) of
         {ok, Res} -> {ok, Res};
