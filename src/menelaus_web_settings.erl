@@ -43,10 +43,7 @@
          handle_settings_max_parallel_indexers_post/1,
 
          handle_settings_view_update_daemon/1,
-         handle_settings_view_update_daemon_post/1,
-
-         handle_dist_protocols_get/1,
-         handle_dist_protocols_post/1]).
+         handle_settings_view_update_daemon_post/1]).
 
 -import(menelaus_util,
         [parse_validate_number/3,
@@ -534,37 +531,3 @@ handle_reset_alerts(Req) ->
     Params = mochiweb_request:parse_qs(Req),
     Token = list_to_binary(proplists:get_value("token", Params, "")),
     reply_json(Req, menelaus_web_alerts_srv:consume_alerts(Token)).
-
-handle_dist_protocols_post(Req) ->
-    validator:handle(
-      fun (Props) ->
-              Protos = proplists:get_value(external, Props),
-              ns_config:set(erl_external_dist_protocols, Protos),
-              handle_dist_protocols_get(Req)
-      end, Req, form, [validator:required(external, _),
-                       validate_ext_protos(external, _),
-                       validator:unsupported(_)]).
-
-validate_ext_protos(Name, State) ->
-    validator:validate(
-        fun (Value) ->
-                Protos = [string:trim(T) || T <- string:tokens(Value, ",")],
-                Allowed = ["inet_tcp", "inet6_tcp", "inet_tls", "inet6_tls"],
-                case lists:all(lists:member(_, Allowed), Protos) of
-                    true ->
-                        Res = [list_to_atom(P ++ "_dist") || P <- Protos],
-                        case lists:member(inet6_tls_dist, Res) andalso
-                             lists:member(inet_tls_dist, Res) of
-                            false -> {value, Res};
-                            true -> {error, "tls over ipv4 and tls over ipv6 "
-                                            "can't be used simultaneously"}
-                        end;
-                    false ->
-                        {error, io_lib:format("invalid protocols list, allowed "
-                                              "protocols are ~p", [Allowed])}
-                end
-        end, Name, State).
-
-handle_dist_protocols_get(Req) ->
-    Val = ns_config:read_key_fast(erl_external_dist_protocols, undefined),
-    reply_json(Req, {[{external, Val}]}).

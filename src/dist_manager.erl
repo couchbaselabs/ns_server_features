@@ -298,14 +298,6 @@ init([]) ->
             ok
     end,
 
-    misc:wait_for_local_name(ns_config, 60000),
-    Self = self(),
-    EventHandler =
-        fun ({erl_external_dist_protocols, _} = E) -> Self ! E;
-            (_) -> ok
-        end,
-    ns_pubsub:subscribe_link(ns_config_events, EventHandler),
-
     gen_server:enter_loop(?MODULE, [], State).
 
 %% There are only two valid cases here:
@@ -523,10 +515,6 @@ handle_call(_Request, _From, State) ->
 handle_cast(_, State) ->
     {noreply, State}.
 
-handle_info({erl_external_dist_protocols, _}, State) ->
-    update_dist_protocols(),
-    {noreply, State};
-
 handle_info(_Info, State) ->
     {noreply, State}.
 
@@ -535,18 +523,3 @@ terminate(_Reason, _State) ->
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
-
-update_dist_protocols() ->
-    Listeners = ns_config:read_key_fast(erl_external_dist_protocols, undefined),
-    AFamily = ns_config:search_node_with_default(address_family, inet),
-    CEncryption = ns_config:search_node_with_default(cluster_encryption, false),
-    case update_dist_config(Listeners, AFamily, CEncryption) of
-        ok ->
-            case cb_dist:reload_config() of
-                ok -> ok;
-                {error, Error} ->
-                    ?log_error("Failed to reload cb_dist config: ~p", [Error]),
-                    {error, Error}
-            end;
-        {error, Reason} -> {error, Reason}
-    end.
