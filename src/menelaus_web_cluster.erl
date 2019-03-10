@@ -544,7 +544,7 @@ do_parse_hostname(Hostname) ->
                     (S) -> {error, {invalid_sheme, S}}
                 end,
     case http_uri:parse(WithScheme, [{scheme_validation_fun, SchemeVer},
-                                     {ipv6_host_with_brackets, true},
+                                     {ipv6_host_with_brackets, false},
                                      {scheme_defaults, [{http, 8091},
                                                         {https, 18091}]}]) of
         {ok, {Scheme, "", Host, Port, "/", ""}} ->
