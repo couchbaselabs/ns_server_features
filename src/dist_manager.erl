@@ -123,8 +123,7 @@ generate_ssl_dist_optfile() ->
                 io_lib:format(
                   "\t\t{certfile, ~p},~n"
                   "\t\t{keyfile, ~p},~n"
-                  "\t\t{cacertfile, ~p},~n"
-                  "\t\t{verify, verify_peer}",
+                  "\t\t{cacertfile, ~p}~n",
                   [CertKeyFile, CertKeyFile, CACertFile]),
 
             ServerSSLOpts =
@@ -151,7 +150,7 @@ verify_cert_for_dist(_Cert, valid_peer, State) ->
 verify_cert_for_dist(_Cert, {extension, _}, State) ->
     {unknown, State};
 verify_cert_for_dist(_Cert, _Event, State) ->
-    {fail, State}.
+    {valid, State}.
 
 strip_full(String) ->
     String2 = string:strip(String),
