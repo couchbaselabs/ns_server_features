@@ -836,7 +836,8 @@ update_type(AFamily, CEncrypt) ->
     end.
 
 update_proto_in_dist_config(AFamily, CEncryption) ->
-    Listeners = ns_config:read_key_fast(erl_external_dist_protocols, undefined),
+    Listeners = ns_config:search_node_with_default(erl_external_dist_protocols,
+                                                   undefined),
     case dist_manager:update_dist_config(Listeners, AFamily, CEncryption) of
         ok ->
             case cb_dist:reload_config() of
@@ -992,7 +993,8 @@ handle_dist_protocols_validated(Req, Props) ->
         ok ->
             case cb_dist:reload_config() of
                 ok ->
-                    ns_config:set(erl_external_dist_protocols, Protos),
+                    ns_config:set({node, node(), erl_external_dist_protocols},
+                                  Protos),
                     menelaus_util:reply(Req, 200);
                 {error, Error} ->
                     Msg = io_lib:format("Failed to reload cb_dist config: ~p",
