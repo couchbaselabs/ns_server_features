@@ -256,8 +256,8 @@ parse_join_cluster_params(Params, ThisIsJoin) ->
         case (catch parse_hostname(Hostname)) of
             {error, HMsgs} ->
                 {HMsgs, undefined};
-            {ParsedHost, ParsedPort} when is_list(ParsedHost) ->
-                {[], {ParsedHost, ParsedPort}}
+            {ParsedScheme, ParsedHost, ParsedPort} when is_list(ParsedHost) ->
+                {[], {ParsedScheme, ParsedHost, ParsedPort}}
         end,
 
     Errors = MissingFieldErrors ++ VersionErrors ++ HostnameError ++
@@ -270,8 +270,9 @@ parse_join_cluster_params(Params, ThisIsJoin) ->
     case Errors of
         [] ->
             {ok, ServicesList} = Services,
-            {Host, Port} = ParsedHostnameRV,
+            {Scheme, Host, Port} = ParsedHostnameRV,
             {ok, [{services, ServicesList},
+                  {scheme, Scheme},
                   {host, Host},
                   {port, Port}
                   | BasePList]};
@@ -319,7 +320,7 @@ handle_join_tail(Req, OtherHost, OtherPort, OtherUser, OtherPswd, Services) ->
 
 
                  RestRV = menelaus_rest:json_request_hilevel(post,
-                                                             {OtherHost, OtherPort,
+                                                             {http, OtherHost, OtherPort,
                                                               Endpoint,
                                                               "application/x-www-form-urlencoded",
                                                               mochiweb_util:urlencode(Payload)},
@@ -519,21 +520,26 @@ parse_hostname(Hostname) ->
 do_parse_hostname([]) ->
     throw({error, [<<"Hostname is required.">>]});
 do_parse_hostname(Hostname) ->
-    WithoutScheme = case string:str(Hostname, "://") of
-                        0 ->
-                            Hostname;
-                        X ->
-                            Scheme = string:sub_string(Hostname, 1, X - 1),
-                            case string:to_lower(Scheme) =:= "http" of
-                                false ->
-                                    throw({error, [list_to_binary("Unsupported protocol " ++ Scheme)]});
-                                true ->
-                                    string:sub_string(Hostname, X + 3)
-                            end
-                    end,
 
-    {Host, StringPort} = misc:split_host_port(WithoutScheme, "8091"),
-    {Host, parse_validate_port_number(StringPort)}.
+    WithScheme = case string:str(Hostname, "://") of
+                     0 -> "https://" ++ Hostname;
+                     _ -> Hostname
+                 end,
+    SchemeVer = fun ("http") -> valid;
+                    ("https") -> valid;
+                    (S) -> {error, {invalid_sheme, S}}
+                end,
+    case http_uri:parse(WithScheme, [{scheme_validation_fun, SchemeVer},
+                                     {ipv6_host_with_brackets, false},
+                                     {scheme_defaults, [{http, 8091},
+                                                        {https, 18091}]}]) of
+        {ok, {Scheme, "", Host, Port, "/", ""}} ->
+            {Scheme, Host, Port};
+        {error, {invalid_sheme, S}} ->
+            throw({error, [list_to_binary("Unsupported protocol " ++ S)]});
+        _ ->
+            throw({error, [list_to_binary("Malformed URL " ++ Hostname)]})
+    end.
 
 handle_add_node(Req) ->
     do_handle_add_node(Req, undefined).
@@ -562,11 +568,12 @@ do_handle_add_node(Req, GroupUUID) ->
         {ok, KV} ->
             User = proplists:get_value(user, KV),
             Password = proplists:get_value(password, KV),
+            Scheme = proplists:get_value(scheme, KV),
             Hostname = proplists:get_value(host, KV),
             Port = proplists:get_value(port, KV),
             Services = proplists:get_value(services, KV),
             case ns_cluster:add_node_to_group(
-                   Hostname, Port,
+                   Scheme, Hostname, Port,
                    {User, Password},
                    GroupUUID,
                    Services) of
