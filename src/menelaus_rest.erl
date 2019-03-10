@@ -105,9 +105,6 @@ json_request_hilevel(Method, {Scheme, Host, Port, Path, MimeType, Payload} = R,
 json_request_hilevel(Method, {Scheme, Host, Port, Path}, Auth, HTTPOptions) ->
     URL = rest_url(Host, Port, Path, Scheme),
     RV = rest_request(Method, URL, [], undefined, [], Auth, HTTPOptions),
-    decode_json_response_ext(RV, Method, {Scheme, Host, Port, Path, [], []});
-json_request_hilevel(Method, {URL, {Scheme, Host, Port, Path}}, Auth, HTTPOptions) ->
-    RV = rest_request(Method, URL, [], undefined, [], Auth, HTTPOptions),
     decode_json_response_ext(RV, Method, {Scheme, Host, Port, Path, [], []}).
 
 json_request_hilevel(Method, Request, Auth) ->
