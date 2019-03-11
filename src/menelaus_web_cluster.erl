@@ -332,13 +332,23 @@ handle_join_tail(Req, OtherScheme, OtherHost, OtherPort, OtherUser, OtherPswd,
                              {SVCPayload, "/controller/addNodeV2"}
                      end,
 
+                 ConnectOpts =
+                     case OtherScheme of
+                         https ->
+                             ns_server_cert:tls_server_validation_options();
+                         http -> []
+                     end,
+
+                 Options = [{connect_options, ConnectOpts},
+                            {timeout, 30000},
+                            {connect_timeout, 30000}],
 
                  RestRV = menelaus_rest:json_request_hilevel(
                             post,
                             {OtherScheme, OtherHost, OtherPort, Endpoint,
                              "application/x-www-form-urlencoded",
                              mochiweb_util:urlencode(Payload)},
-                            {OtherUser, OtherPswd}),
+                            {OtherUser, OtherPswd}, Options),
                  case RestRV of
                      {error, What, _M, {bad_status, 404, Msg}} ->
                          {error, What, <<"Node attempting to join an older cluster. Some of the selected services are not available.">>, {bad_status, 404, Msg}};
