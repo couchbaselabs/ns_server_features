@@ -121,8 +121,12 @@ engage_cluster_with_cluster_ca(NodeKVList) ->
     end.
 
 apply_net_config(NodeKVList) ->
-    ProtosB = proplists:get_value(<<"dist_protocols">>, NodeKVList,
-                                  [<<"inet_tcp_dist">>, <<"inet6_tcp_dist">>]),
+    ProtosB =
+        case proplists:get_value(<<"dist_protocols">>, NodeKVList) of
+            Ps when Ps =:= <<"undefined">>; Ps =:= undefined ->
+                [<<"inet_tcp_dist">>, <<"inet6_tcp_dist">>];
+            Ps -> Ps
+        end,
     Protos = [binary_to_atom(P, latin1) || P <- ProtosB],
     AFamilyBin = proplists:get_value(<<"address_family">>, NodeKVList,
                                      <<"inet">>),
