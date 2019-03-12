@@ -29,7 +29,7 @@
 -export([adjust_my_address/3, read_address_config/0, save_address_config/1,
          ip_config_path/0, using_user_supplied_address/0, reset_address/0,
          wait_for_node/1, dist_config_path/1, update_dist_config/3,
-         generate_ssl_dist_optfile/0]).
+         generate_ssl_dist_optfile/2]).
 
 %% used by babysitter and ns_couchdb
 -export([configure_net_kernel/0]).
@@ -105,14 +105,14 @@ update_dist_config(Listeners, NewAFamily, NewCEncryption) ->
             {error, Reason}
     end.
 
-generate_ssl_dist_optfile() ->
+generate_ssl_dist_optfile(NeedRewrite, VerifyPeer) ->
     FilePath = filename:join([path_config:component_path(data),
                               "config", "ssl_dist_opts"]),
 
     case filelib:is_file(FilePath) of
-        true ->
+        true when not NeedRewrite ->
             ok;
-        false ->
+        _ ->
             CertKeyFile = ns_ssl_services_setup:ssl_cert_key_path(),
             CACertFile = ns_ssl_services_setup:raw_ssl_cacert_key_path(),
 
@@ -121,8 +121,9 @@ generate_ssl_dist_optfile() ->
                        {cacertfile, CACertFile}],
 
             ServerSSLOpts = [{fail_if_no_peer_cert, true}|SSLOpts],
+            ClientSSLOpts = [{verify, verify_peer} || VerifyPeer] ++ SSLOpts,
 
-            Opts = [{server, ServerSSLOpts}, {client, SSLOpts}],
+            Opts = [{server, ServerSSLOpts}, {client, ClientSSLOpts}],
 
             filelib:ensure_dir(FilePath),
             misc:atomic_write_file(FilePath, io_lib:format("~p.", [Opts]))

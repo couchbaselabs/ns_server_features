@@ -677,12 +677,16 @@ apply_node_cert_data({generated, CertPEM, PKeyPEM, Node}, Path) ->
     ok = misc:atomic_write_file(Path, [LocalCert, LocalPKey]),
     ok = misc:atomic_write_file(raw_ssl_cacert_key_path(), CertPEM),
     ok = misc:atomic_write_file(memcached_cert_path(), [LocalCert, CertPEM]),
-    ok = misc:atomic_write_file(memcached_key_path(), LocalPKey);
+    ok = misc:atomic_write_file(memcached_key_path(), LocalPKey),
+    dist_manager:generate_ssl_dist_optfile(_Rewrite = true,
+                                           _VerifyPeer = false);
 apply_node_cert_data({user_set, Cert, PKey, CAChain}, Path) ->
     ok = misc:atomic_write_file(Path, [Cert, PKey]),
     ok = misc:atomic_write_file(raw_ssl_cacert_key_path(), CAChain),
     ok = misc:atomic_write_file(memcached_cert_path(), [Cert, CAChain]),
-    ok = misc:atomic_write_file(memcached_key_path(), PKey).
+    ok = misc:atomic_write_file(memcached_key_path(), PKey),
+    dist_manager:generate_ssl_dist_optfile(_Rewrite = true,
+                                           _VerifyPeer = true).
 
 -spec get_user_name_from_client_cert(term()) -> string() | undefined | failed.
 get_user_name_from_client_cert(Val) ->
