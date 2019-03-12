@@ -41,7 +41,8 @@ start(_, _) ->
     %% based on the distribution config stored in the file.
     'nonode@nohost' = node(),
 
-    ok = dist_manager:generate_ssl_dist_optfile(),
+    ok = dist_manager:generate_ssl_dist_optfile(_Rewrite = false,
+                                                _VerifyPeer = false),
 
     %% When started from the cluster_run script, the babysitter name will have
     %% node ID encoded into it as the developer can start multiple nodes. As we
