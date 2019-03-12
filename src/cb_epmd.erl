@@ -44,20 +44,14 @@ names(EpmdAddr) -> erl_epmd:names(EpmdAddr).
 register_node(Name, PortNo) ->
     register_node(Name, PortNo, inet).
 
-register_node(Name, PortNo, Family) ->
-    %% backward compat: we need to register non tls ports on epmd to allow
-    %% old nodes to find this node.
-    %% When upgrade is finished this code can be dropped
-    case is_ns_server_non_tls_port(PortNo) of
-        true ->
-            %% creation is zero because we don't use it anyway
-            %% real 'creation' is generated in cb_dist.erl
-            case erl_epmd:register_node(Name, PortNo, Family) of
-                {ok, _} -> {ok, 0};
-                {error, already_registered} -> {ok, 0}
-            end;
-        false -> {ok, 0}
-    end.
+register_node(_Name, _PortNo, _Family) ->
+    %% Since ports are static we don't need to register them, but
+    %% there is one exception: because of backward compatibility
+    %% we register non tls ns_server ports in order to let pre-madhatter
+    %% nodes find this node. The registering itself is done on cb_dist.
+    %% 'Creation' is zero because we don't use it anyway
+    %% real 'creation' is generated in cb_dist.erl
+    {ok, 0}.
 
 port_for_node(Module, NodeStr) ->
     case node_type(NodeStr) of
@@ -102,12 +96,6 @@ shift(Module) -> proplists:get_value(Module, port_shifts()).
 base_port(ns_server) -> 21100;
 base_port(babysitter) -> 21200;
 base_port(couchdb) -> 21300.
-
-%% it's magic but it's needed for backward compat only
-is_ns_server_non_tls_port(Port) ->
-    (base_port(ns_server) =< Port) andalso
-    (Port < base_port(babysitter)) andalso
-    (((Port - base_port(ns_server)) rem 2) == 0).
 
 node_type("ns_1") -> {ok, ns_server, "0"};
 node_type("babysitter_of_ns_1") -> {ok, babysitter, "0"};

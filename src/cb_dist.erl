@@ -341,7 +341,17 @@ listen_proto(Module, NodeName) ->
     NameStr = atom_to_list(NodeName),
     {ok, Port} = cb_epmd:port_for_node(Module, NameStr),
     info_msg("Starting ~p listener on ~p...", [Module, Port]),
-    ListenFun = fun () -> Module:listen(NodeName) end,
+    ListenFun =
+        fun () ->
+                case Module:listen(NodeName) of
+                    {ok, _} = Res ->
+                        case maybe_register_on_epmd(Module, NodeName, Port) of
+                            ok -> Res;
+                            {error, _} = Error -> Error
+                        end;
+                    Error -> Error
+                end
+        end,
     case with_dist_port(Port, ListenFun) of
         {ok, Res} -> {ok, Res};
         Error ->
@@ -349,6 +359,26 @@ listen_proto(Module, NodeName) ->
                       [Module, Port, Error]),
             Error
     end.
+
+%% Backward compat: we need to register ns_server non tls port on epmd to allow
+%% old nodes to find this node
+%% This code can be dropped if upgrade from Alice is not supported
+maybe_register_on_epmd(Module, NodeName, PortNo)
+  when Module =:= inet_tcp_dist;
+       Module =:= inet6_tcp_dist ->
+    case cb_epmd:node_type(atom_to_list(NodeName)) of
+        {ok, ns_server, _} ->
+            Family = proto_to_family(Module),
+            case erl_epmd:register_node(NodeName, PortNo, Family) of
+                {ok, _} -> ok;
+                {error, already_registered} -> ok;
+                Error -> Error
+            end;
+        _ ->
+            ok
+    end;
+maybe_register_on_epmd(_Module, _NodeName, _PortNo) ->
+    ok.
 
 can_add_proto(P, #s{listeners = L}) ->
     case is_valid_protocol(P) of
