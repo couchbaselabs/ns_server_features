@@ -116,23 +116,16 @@ generate_ssl_dist_optfile() ->
             CertKeyFile = ns_ssl_services_setup:ssl_cert_key_path(),
             CACertFile = ns_ssl_services_setup:raw_ssl_cacert_key_path(),
 
-            SSLOpts =
-                io_lib:format(
-                  "\t\t{certfile, ~p},~n"
-                  "\t\t{keyfile, ~p},~n"
-                  "\t\t{cacertfile, ~p}~n",
-                  [CertKeyFile, CertKeyFile, CACertFile]),
+            SSLOpts = [{certfile, CertKeyFile},
+                       {keyfile, CertKeyFile},
+                       {cacertfile, CACertFile}],
 
-            ServerSSLOpts =
-                io_lib:format("\t\t{fail_if_no_peer_cert, true},~n~s", [SSLOpts]),
+            ServerSSLOpts = [{fail_if_no_peer_cert, true}|SSLOpts],
 
-            Data =
-                io_lib:format(
-                  "[~n\t{server, [~n~s~n\t]},~n\t{client, [~n~s~n\t]}~n].",
-                  [ServerSSLOpts, SSLOpts]),
+            Opts = [{server, ServerSSLOpts}, {client, SSLOpts}],
 
             filelib:ensure_dir(FilePath),
-            misc:atomic_write_file(FilePath, Data)
+            misc:atomic_write_file(FilePath, io_lib:format("~p.", [Opts]))
     end.
 
 strip_full(String) ->
