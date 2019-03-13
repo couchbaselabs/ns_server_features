@@ -758,7 +758,7 @@ handle_node_altaddr_external_delete(Req) ->
 
 is_raw_addr_node(Node) ->
     {_, Host} = misc:node_name_host(Node),
-    inet:parse_address(Host) =/= {error, einval}.
+    misc:is_raw_ip(Host).
 
 check_for_raw_addr(State) ->
     %% Fail the request if the cluster is provisioned and has any node
