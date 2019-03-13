@@ -576,7 +576,7 @@ do_add_node_with_connectivity(Scheme, RemoteAddr, RestPort, Auth, GroupUUID,
             http -> []
         end,
 
-    Options = [{connect_options, ConnectOpts},
+    Options = [{connect_options, [misc:get_net_family() | ConnectOpts]},
                {timeout, 30000},
                {connect_timeout, 30000}],
 
@@ -751,6 +751,8 @@ do_add_node_engaged_inner(NodeKVList, OtpNode, Auth, Services, Scheme) ->
             http -> []
         end,
 
+    ConnectOpts2 = [misc:get_net_family() | ConnectOpts],
+
     ?cluster_debug("Posting the following to complete_join on ~p:~n~p",
                    [{Scheme2, Hostname0, Port}, sanitize_node_info(Struct)]),
     RV = menelaus_rest:json_request_hilevel(post,
@@ -759,7 +761,7 @@ do_add_node_engaged_inner(NodeKVList, OtpNode, Auth, Services, Scheme) ->
                                              "application/json",
                                              mochijson2:encode(Struct)},
                                             Auth,
-                                            [{connect_options, ConnectOpts},
+                                            [{connect_options, ConnectOpts2},
                                              {timeout, ?COMPLETE_TIMEOUT},
                                              {connect_timeout, ?COMPLETE_TIMEOUT}]),
     ?cluster_debug("Reply from complete_join on ~p:~n~p",
