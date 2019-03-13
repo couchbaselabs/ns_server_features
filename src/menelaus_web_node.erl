@@ -758,7 +758,7 @@ handle_node_altaddr_external_delete(Req) ->
 
 is_raw_addr_node(Node) ->
     {_, Host} = misc:node_name_host(Node),
-    inet:parse_address(Host) =/= {error, einval}.
+    misc:is_raw_ip(Host).
 
 check_for_raw_addr(AFamily) ->
     CurrAFamily = ns_config:search_node_with_default(address_family, inet),

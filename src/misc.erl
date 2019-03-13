@@ -2597,3 +2597,6 @@ read_int_from_file(File, Default) ->
     catch
         _:_ -> Default
     end.
+
+is_raw_ip(Host) ->
+    inet:parse_address(Host) =/= {error, einval}.
