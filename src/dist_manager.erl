@@ -28,8 +28,8 @@
 
 -export([adjust_my_address/3, read_address_config/0, save_address_config/1,
          ip_config_path/0, using_user_supplied_address/0, reset_address/0,
-         wait_for_node/1, dist_config_path/1, store_dist_config/3,
-         update_dist_config/1, generate_ssl_dist_optfile/0]).
+         wait_for_node/1, dist_config_path/1, update_dist_config/3,
+         generate_ssl_dist_optfile/0]).
 
 %% custom x509-path validation function used by Erlang TLS distribution.
 -export([verify_cert_for_dist/3]).
@@ -62,68 +62,51 @@ using_user_supplied_address() ->
 reset_address() ->
     gen_server:call(?MODULE, reset_address).
 
-store_dist_config(DCfgFile, Cfg) ->
-    Data = io_lib:format("~p.~n", [Cfg]),
-    misc:atomic_write_file(DCfgFile, Data).
-
-store_dist_config(DCfgFile, CurrDistType, undefined) ->
-    Cfg = {dist_type, list_to_atom(CurrDistType)},
-    store_dist_config(DCfgFile, Cfg);
-store_dist_config(DCfgFile, CurrDistType, NewDistType) ->
-    Cfg = {dist_type,
-           list_to_atom(CurrDistType),
-           list_to_atom(NewDistType)},
-    store_dist_config(DCfgFile, Cfg).
-
-update_dist_config(NewAFamily) ->
-    CurrDistType = misc:get_proto_dist_type(),
-    NewDistType = case NewAFamily of
-                      "ipv4" -> "inet_tcp";
-                      "ipv6" -> "inet6_tcp"
-                  end,
-
-    case NewDistType of
-        CurrDistType ->
-            ok;
-        _ ->
-            DCfgFile = dist_config_path(path_config:component_path(data)),
-            ?log_debug("Saving new networking mode (~s) to config file: ~s",
-                       [NewDistType, DCfgFile]),
-            store_dist_config(DCfgFile, CurrDistType, NewDistType)
+store_dist_config(DCfgFile, DCfg) ->
+    DirName = filename:dirname(DCfgFile),
+    FileName = filename:basename(DCfgFile),
+    TmpPath = path_config:tempfile(DirName, FileName, ".tmp"),
+    Data = io_lib:format("~p.~n", [DCfg]),
+    try
+        case misc:write_file(TmpPath, Data) of
+            ok ->
+                case cb_dist:validate_config_file(TmpPath) of
+                    ok -> misc:atomic_rename(TmpPath, DCfgFile);
+                    Y -> Y
+                end;
+            X ->
+                X
+        end
+    after
+        (catch file:delete(TmpPath))
     end.
 
-%% This function will be called by the init script to determine
-%% the networking mode to start with.
-get_proto_dist_type(Params) ->
-    [DataDir, StartStop] = Params,
-    DCfgFile = dist_config_path(DataDir),
-
-    ExitStatus =
-        case file:consult(DCfgFile) of
-            {error, enoent} ->
-                io:format("inet_tcp"),
-                0;
-            {error, Err} ->
-                io:format("Couldn't determine proto_dist value. Failed to "
-                          "read from `~s` file: ~p", [DCfgFile, Err]),
-                1;
-            {ok, []} ->
-                io:format("inet_tcp"),
-                0;
-            {ok, Val} ->
-                DistCfg = lists:keyfind(dist_type, 1, Val),
-                Modes = case DistCfg of
-                            {dist_type, C, N} -> [C, N];
-                            {dist_type, C}    -> [C]
-                        end,
-                RV = case StartStop of
-                         "start" -> lists:last(Modes);
-                         "stop"  -> hd(Modes)
-                     end,
-
-                io:format("~s", [RV]),
-                0
+update_dist_config(Listeners, NewAFamily, NewCEncryption) ->
+    PreferredExternal =
+        case {NewAFamily, NewCEncryption} of
+            {inet, false} -> inet_tcp_dist;
+            {inet, true} -> inet_tls_dist;
+            {inet6, false} -> inet6_tcp_dist;
+            {inet6, true} -> inet6_tls_dist
         end,
+    PreferredLocal =
+        case NewAFamily of
+            inet -> inet_tcp_dist;
+            inet6 -> inet6_tcp_dist
+        end,
+    Cfg = [{external_listeners, Listeners} || Listeners =/= undefined] ++
+          [{preferred_external_proto, PreferredExternal},
+           {preferred_local_proto, PreferredLocal}],
+    CfgFile = cb_dist:config_path(),
+    case store_dist_config(CfgFile, Cfg) of
+        ok ->
+            ?log_info("Updated cb_dist config ~p: ~p", [CfgFile, Cfg]),
+            ok;
+        {error, Reason} ->
+            ?log_error("Failed to save cb_dist config to ~p with reason: ~p",
+                       [CfgFile, Reason]),
+            {error, Reason}
+    end.
 
 generate_ssl_dist_optfile() ->
     FilePath = filename:join([path_config:component_path(data),
