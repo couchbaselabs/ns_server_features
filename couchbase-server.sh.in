@@ -48,6 +48,7 @@ COOKIEFILE="@PREFIX@/var/lib/couchbase/couchbase-server.babysitter.cookie"
 NODEFILE="@PREFIX@/var/lib/couchbase/couchbase-server.babysitter.node"
 STATIC_CONFIG_PATH="@PREFIX@/etc/couchbase/static_config"
 CB_DATA_DIR="@PREFIX@/var/lib/couchbase"
+SSL_DIST_OPTFILE="$CB_DATA_DIR/config/ssl_dist_opts"
 
 couch_start_arguments=""
 
@@ -166,6 +167,7 @@ _start() {
         -sasl sasl_error_logger false \
         -hidden \
         -proto_dist cb \
+        -ssl_dist_optfile $SSL_DIST_OPTFILE \
         -setcookie nocookie \
         $* \
         -run ns_babysitter_bootstrap -- \
@@ -185,6 +187,7 @@ _stop() {
 
     erl \
         -proto_dist cb \
+        -ssl_dist_optfile $SSL_DIST_OPTFILE \
         -noshell \
         -hidden \
         -setcookie "$cookie" \

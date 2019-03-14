@@ -27,6 +27,7 @@
          start_link_rest_service/0,
          ssl_cert_key_path/0,
          ssl_cacert_key_path/0,
+         raw_ssl_cacert_key_path/0,
          memcached_cert_path/0,
          memcached_key_path/0,
          sync_local_cert_and_pkey_change/0,
