@@ -96,32 +96,6 @@ EOF
     fi
 }
 
-_check_inet_mode() {
-    CMD=$1
-    PROTO_DIST=`erl \
-                -pa "$NS_EBIN_PATH" \
-                -noshell   \
-                -setcookie nocookie \
-                -run dist_manager get_proto_dist_type "$CB_DATA_DIR" $CMD`
-    if [ $? -ne 0 ]
-    then
-        echo $PROTO_DIST
-        exit 1
-    fi
-
-    if [ $PROTO_DIST == "inet6_tcp" ]; then
-        if [ x"${ENTERPRISE}" = "xtrue" ]
-        then
-            VM_NAME='babysitter_of_ns_1@::1'
-        else
-            echo "IPv6 is supported only in enterprise edition"
-            exit 1
-        fi
-    else
-        VM_NAME='babysitter_of_ns_1@127.0.0.1'
-    fi
-}
-
 _prepare_datadir () {
     test -d "$CB_DATA_DIR" || mkdir -p "$CB_DATA_DIR"
     cd "$CB_DATA_DIR"
@@ -178,8 +152,6 @@ _start() {
     _maybe_start_epmd
     _load_config
 
-    _check_inet_mode "start"
-
     # note: we depend on pwd being $datadir from _prepare_datadir
     _drop_old_crashdumps
 
@@ -193,8 +165,7 @@ _start() {
                 global_enable_tracing true \
         -sasl sasl_error_logger false \
         -hidden \
-        -name $VM_NAME \
-        -proto_dist $PROTO_DIST \
+        -proto_dist cb \
         -setcookie nocookie \
         $* \
         -run ns_babysitter_bootstrap -- \
@@ -208,18 +179,16 @@ _start() {
 _stop() {
     [ -f "$COOKIEFILE" -a -f "$NODEFILE" ] || return 1
 
-    _check_inet_mode "stop"
-
     cookie=`cat "$COOKIEFILE"`
     node=`cat "$NODEFILE"`
+    dist_cfg_file="$CB_DATA_DIR/config/dist_cfg"
 
     erl \
-        -name executioner@executioner \
-        -proto_dist $PROTO_DIST \
+        -proto_dist cb \
         -noshell \
         -hidden \
         -setcookie "$cookie" \
-        -eval "ns_babysitter_bootstrap:remote_stop('$node')"
+        -eval "ns_babysitter_bootstrap:remote_stop('$node', $dist_cfg_file)"
 
     errcode=$?
 

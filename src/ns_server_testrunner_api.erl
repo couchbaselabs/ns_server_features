@@ -89,7 +89,9 @@ grab_all_goxdcr_checkpoints() ->
     {json, {struct, metakv:iterate_matching(?XDCR_CHECKPOINT_PATTERN)}}.
 
 shutdown_nicely() ->
-    ns_babysitter_bootstrap:remote_stop(ns_server:get_babysitter_node()).
+    DCfgFile = dist_manager:dist_config_path(path_config:component_path(data)),
+    ns_babysitter_bootstrap:remote_stop(ns_server:get_babysitter_node(),
+                                        DCfgFile).
 
 master_node() ->
     mb_master:master_node().
