@@ -953,8 +953,9 @@ handle_dist_protocols(Req) ->
 
 handle_dist_protocols_validated(Req, Props) ->
     Protos = proplists:get_value(external, Props),
-    AFamily = ns_config:search_node_with_default(address_family, inet),
-    CEncryption = ns_config:search_node_with_default(cluster_encryption, false),
+    ?log_info("Node is going to change dist protocols to ~p", [Protos]),
+    AFamily = cb_dist:address_family(),
+    CEncryption = cb_dist:external_encryption(),
     case dist_manager:update_dist_config(Protos, AFamily, CEncryption) of
         ok ->
             case cb_dist:reload_config() of
